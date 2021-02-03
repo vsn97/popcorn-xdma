@@ -202,6 +202,19 @@ void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 }
 EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
+/* XDMA Features */
+
+int pcn_kmsg_xdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size)
+{
+	return transport->xdma_read(from_nid, addr, rdma_addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_xdma_read);
+
+int pcn_kmsg_xdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size)
+{
+    return transport->xdma_write(dest_nid, rdma_addr, addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_xdma_write);
 
 void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 {

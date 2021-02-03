@@ -175,9 +175,18 @@ int pcn_kmsg_rdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t s
 
 int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key);
 
+/**
+ *  XDMA Features
+ */
+
+int pcn_kmsg_xdma_write(int dest_nid, dma_addr_t raddr, void *addr, size_t size);
+
+int pcn_kmsg_xdma_read(int from_nid, void *addr, dma_addr_t raddr, size_t size);
+
 /* TRANSPORT DESCRIPTOR */
 enum {
 	PCN_KMSG_FEATURE_RDMA = 1,
+	PCN_KMSG_FEATURE_XDMA = 2,
 };
 
 /**
@@ -203,6 +212,9 @@ struct pcn_kmsg_transport {
 	void (*unpin_rdma_buffer)(struct pcn_kmsg_rdma_handle *);
 	int (*rdma_write)(int, dma_addr_t, void *, size_t, u32);
 	int (*rdma_read)(int, void *, dma_addr_t, size_t, u32);
+
+	int (*xdma_write)(int, dma_addr_t, void *, size_t);
+	int (*xdma_read)(int, void *, dma_addr_t, size_t);
 };
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);

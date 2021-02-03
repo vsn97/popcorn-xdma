@@ -12,7 +12,7 @@ if POPCORN_KMSG
 config POPCORN_KMSG_SOCKET
 	tristate "Over TCP/IP"
 	depends on INET && m
-	default m
+	default n
 	help
 		Communicate through sockets on IP on Ethernet
 
@@ -22,6 +22,16 @@ config POPCORN_KMSG_RDMA
 	default n
 	help
 		Mellanox Connect-X4 and Connect-X5
+
+# Messaging Layer over FPGA 
+
+config POPCORN_KMSG_XDMA
+	tristate "Over FPGA XDMA"
+	depends on m && PCI
+	default m
+	help
+		Xilinx Alveo FPGA Accelerator Card
+
 
 # InfiniBand
 #config POPCORN_KMSG_IB
