@@ -21,7 +21,7 @@
 #include <linux/errno.h>
 #include <rdma/rdma_cm.h>
 #include <linux/seq_file.h>
-
+#include <linux/workqueue.h>
 #include <popcorn/stat.h>
 #include <popcorn/pcn_kmsg.h>
 
@@ -67,10 +67,24 @@ static unsigned long bypass_address;
 #define irq_mask 0x2018
 #define irq_enable 0x2014
 
+#define ch1_off 0x100
+
+//static DEFINE_SPINLOCK(__xdma_slots_lock)
+
 static struct pci_dev *pci_dev;
 static void __iomem *xdma_bypass;
 static void __iomem *xdma_ctl;
 static char *__xdma_sink_address;
+static dma_addr_t __xdma_sink_dma_address;
+static struct workqueue_struct *wq;
+
+/* Index of Receive Queue */
+
+static int index = 0;
+static int page_ix = 0;
+static int nid;
+
+static int KV[XDMA_SLOTS];
 
 /*
 static struct device dma_dev = {
@@ -93,6 +107,11 @@ enum {
 	SW_FLAG_FROM_BUFFER = 1,
 };
 enum {
+	KMSG = 0,
+	PAGE = 1,
+};
+
+enum {
 
 	CTL = 0,
 	BYPASS = 1,
@@ -107,30 +126,30 @@ enum {
 	FROM_DEVICE = 1,
 };
 
-/* Send Buffer */
+/* Send Buffer for pcn_kmsg*/
 
-struct sw 
+struct send_work 
 {
   struct work_hdr header;
   void *addr;
   u64 dma_addr;
   u32 length;
-  struct sw *next;
+  struct send_work *next;
   struct completion *done;
   unsigned long flags;
 };
 
-/* Receive Buffer */
+/* Receive Buffer for pcn_kmsg */
 
-struct rw 
+struct recv_work 
 {
+  struct work_struct work_q;
   struct work_hdr header;
   void *addr;
-  u32 length;
-  dma_addr_t dma_addr;
+  u64 dma_addr;
 };
 
-/* XDMA Global Work Buffer */
+/* XDMA Work Buffer */
 
 struct xdma_work
  {
@@ -139,7 +158,6 @@ struct xdma_work
   struct work_hdr header;
   struct xdma_work *next;
   u32 length;
-  void *addr;
   dma_addr_t dma_addr;
   u64 remote_addr;
   unsigned long flags;
@@ -147,8 +165,18 @@ struct xdma_work
 
  };
 
+ struct queue {
+	unsigned int tail;	    
+	unsigned int head;	    
+	unsigned int size;	    
+	unsigned int nr_entries;      
+	struct send_work **work_list; 		    
+};
+
+typedef struct queue queue_t;
+
  struct rb_alloc_header{
- 	struct xdma_work *work;
+ 	struct send_work *work;
  	unsigned int flags;
  	unsigned int magic;
 
@@ -158,18 +186,22 @@ const unsigned int rb_alloc_header_magic = 0xbad7face;
 
 static DEFINE_SPINLOCK(send_work_pool_lock);
 static struct ring_buffer xdma_send_buff = {};
-static struct xdma_work *send_work_pool = NULL;
+static struct send_work *send_work_pool = NULL;
+
+static queue_t *send_queue;
+static queue_t *recv_queue;
 
 static DEFINE_SPINLOCK(xdma_work_pool_lock);
 static struct xdma_work *xdma_work_pool = NULL;
 
 
-static void __write_register(void *iomem, u32 value)
-{
-	iowrite32(iomem, value);
+static void write_register(u32 value, void *iomem)
+{   
+	iowrite32(0x00, iomem);
+	iowrite32(value,iomem);
 }
 
-static void __read_register(void *iomem)
+static inline u32 read_register(void *iomem)
 {
 	return ioread32(iomem);
 }
@@ -180,11 +212,11 @@ static u64 __dma_map(void *addr, size_t size, int x)
 {
 	if(!x)
 	{
-		return dma_map_single(pci_dev->dev, addr, size, DMA_TO_DEVICE);	
+		return dma_map_single(&pci_dev->dev, addr, size, DMA_TO_DEVICE);	
 	}
 	else
 	{
-		return dma_map_single(pci_dev->dev, addr, size, DMA_FROM_DEVICE);	
+		return dma_map_single(&pci_dev->dev, addr, size, DMA_FROM_DEVICE);	
 	}
 	
 }
@@ -193,7 +225,7 @@ static u64 __dma_map(void *addr, size_t size, int x)
 
 static int __verify_dma_mapping(u64 dma_addr)
 {
-	return dma_mapping_error(pci_dev->dev, dma_addr);
+	return dma_mapping_error(&pci_dev->dev, dma_addr);
 }
 
 /* DMA Unmapping */
@@ -202,11 +234,11 @@ static void dma_unmap(u64 dma_addr, size_t size, int y)
 {
 	if(!y)
 	{
-		dma_unmap_single(pci_dev->dev, dma_addr, size, DMA_TO_DEVICE);
+		dma_unmap_single(&pci_dev->dev, dma_addr, size, DMA_TO_DEVICE);
 	}
 	else
 	{
-		dma_unmap_single(pci_dev->dev, dma_addr, size, DMA_FROM_DEVICE);
+		dma_unmap_single(&pci_dev->dev, dma_addr, size, DMA_FROM_DEVICE);
 	}
 	
 }
@@ -218,15 +250,69 @@ static void __iomem *__remap_regions(unsigned long address, size_t size)
   return ioremap(address, size);
 }
   
-static int __xdma_transfer(dma_addr_t dmaAddr, size_t size)
+static void __update_recv_index(dma_addr_t dma_addr, size_t size)
+{
+  
+  u32 addr_msb, addr_lsb;
+
+  addr_msb = (u32)((dma_addr & XDMA_MSB_MASK) >> 32);
+  addr_lsb = (u32)(dma_addr & XDMA_LSB_MASK);
+
+  write_register(addr_msb, (u32 *)xdma_bypass + 10);
+  write_register(addr_lsb, (u32 *)xdma_bypass + 11);
+  write_register(size, (u32 *)xdma_bypass + 12);
+
+}
+
+int queue_empty(queue_t* q){
+		if (q == NULL){
+			return -1;
+		}else if(q->size == 0) {
+			return 1;
+		}else {
+			return 0;
+		}
+}
+
+int queue_full(queue_t* q){
+	if (q == NULL){
+		return -1;
+	}else if(q->size == q->nr_entries){
+		return 1;
+	}else{
+		return 0;
+	}
+}
+
+static int __enq_send(struct send_work *work){
+  
+  while(queue_full(send_queue));
+  send_queue->tail = (send_queue->tail + 1) % send_queue->nr_entries; 
+  send_queue->work_list[send_queue->tail] = work;
+  send_queue->size++;
+  return 0;
+}
+
+static unsigned int __get_index(queue_t *q)
+{
+  
+  ++index;
+  if(index == q->nr_entries)
+  {
+  	return 0;
+  }
+
+  return index;
+}
+
+static int __xdma_transfer(dma_addr_t dmaAddr, size_t size, int x)
 {
 
    u32 addr_lsb, addr_msb;
 
   //Mapping the physical address to virtual addresses to perform R/W operations with size
 
-  p = ioremap(bar_address, size);
-  if(p == NULL)
+  if(xdma_bypass == NULL)
   {
      goto remap;
   }
@@ -235,10 +321,21 @@ static int __xdma_transfer(dma_addr_t dmaAddr, size_t size)
 
   printk("MSB and LSB : %lx and %lx\n", addr_msb, addr_lsb);
 
-  iowrite32(addr_lsb, (u32 *)p);
-  iowrite32(addr_msb, (u32 *)p + 1);
-  iowrite32(size, (u32 *)p + 2);
-  printk(KERN_INFO "Contents: %x\n", ioread32((u64 *)p));
+  /* KMSGs are sent through Channel 0 and Page data through Channel 1 of XDMA */
+  
+  if(!x)
+  {
+    write_register(addr_msb, (u32 *)xdma_bypass + 1);
+    write_register(addr_lsb, (u32 *)xdma_bypass + 2);
+    write_register(size, (u32 *)xdma_bypass + 3);
+  }
+  else
+  {
+    write_register(addr_lsb, (u32 *)xdma_bypass + 30);
+    write_register(addr_msb, (u32 *)xdma_bypass + 31);
+    write_register(size, (u32 *)xdma_bypass + 32);
+  }
+
   printk(KERN_INFO "\n Initiating Transfer .... \n");
 
   return 0;
@@ -249,10 +346,10 @@ static int __xdma_transfer(dma_addr_t dmaAddr, size_t size)
 
 }
 
-static struct xdma_work *__get_xdma_send_work_map(struct pcn_kmsg_message *msg, size_t size)
+static struct send_work *__get_xdma_send_work_map(struct pcn_kmsg_message *msg, size_t size)
 {
   unsigned long flags;
-  struct xdma_work *work;
+  struct send_work *work;
   void *map_start = NULL;
 
   spin_lock_irqsave(&send_work_pool_lock, flags);
@@ -266,7 +363,7 @@ static struct xdma_work *__get_xdma_send_work_map(struct pcn_kmsg_message *msg, 
   if(!msg)
   {
   	struct rb_alloc_header *rbah;
-  	work->addr = ring_buffer_get_mapped(&xdma_send_buff, sizeof(struct rb_alloc_header) + size, work->dma_addr);
+  	work->addr = ring_buffer_get_mapped(&xdma_send_buff, sizeof(struct rb_alloc_header) + size, &work->dma_addr);
 
   	if(likely(work->addr)) 
   	{
@@ -310,7 +407,7 @@ static struct xdma_work *__get_xdma_send_work_map(struct pcn_kmsg_message *msg, 
   return work;
 }
 
-static struct xdma_work *__get_xdma_send_work(size_t size)
+static struct send_work *__get_xdma_send_work(size_t size)
 {
 	return __get_xdma_send_work_map(NULL, size);  
 }
@@ -334,7 +431,7 @@ static int __refill_xdma_work(int xdma_slot)
 		xw->header.type = WORK_TYPE_XDMA;
 
 		xw->remote_addr = 0;
-		xw->addr = 0;
+		xw->dma_addr = 0;
 		xw->length = 0;
 
 		if (!last_work) last_work = xw;
@@ -370,7 +467,7 @@ static struct xdma_work *__get_xdma_work(dma_addr_t dma_addr, size_t size, dma_a
 		__refill_xdma_work(XDMA_SLOTS);
 	}
 
-  xw->addr = dma_addr;
+  xw->dma_addr = dma_addr;
   xw->length = size;
   xw->remote_addr = raddr;
 
@@ -385,13 +482,19 @@ static void __put_xdma_work(struct xdma_work *xw)
 	spin_unlock(&xdma_work_pool_lock);
 }
 
-static int __send_sw(struct sw *work, size_t size)
+/* Function to enqueue the send work to the send queue */
+
+static int __send_sw(struct send_work *work)
 {	
 	int ret;
 	dma_addr_t dma_addr = work->dma_addr;
-	size_t length = size;
+	size_t size = work->length;
 
-	ret = __xdma_transfer(dma_addr, length);
+	/* To check if the XDMA engine is free */
+	
+	while((read_register((u32*)xdma_bypass+0x02)));
+	ret = __xdma_transfer(dma_addr, size, KMSG);
+
 	if(ret) return ret;
 
 	return 0;
@@ -400,17 +503,17 @@ static int __send_sw(struct sw *work, size_t size)
 static int __send_xdma_work(struct xdma_work *work, size_t size)
 { 
   int ret;
-  unsigned long addr_lsb, addr_msb;
-  dma_addr_t dmaAddr;
-  dmaAddr = work->addr;
 
-  ret = __xdma_transfer(dmaAddr, size);
+  dma_addr_t dmaAddr;
+  dmaAddr = work->dma_addr;
+
+  ret = __xdma_transfer(dmaAddr, size, PAGE);
   if(ret) return ret;
 
  return 0;
 }
 
-static void __put_xdma_send_work(struct sw *work)
+static void __put_xdma_send_work(struct send_work *work)
 {
 	unsigned long flags;
 	if(test_bit(SW_FLAG_MAPPED, &work->flags))
@@ -436,11 +539,40 @@ static void __put_xdma_send_work(struct sw *work)
 
 }
 
+
+static int deq_send(queue_t *q)
+{
+  struct send_work *work;
+  int ret;
+		if (!q){
+			return -1;
+
+		}
+		else if (queue_empty(q) == 1){
+			return 1;
+		}
+
+		else{
+
+			 work = q->work_list[q->head];
+			 q->head = (q->head + 1) % q->nr_entries;
+			 q->size--;
+			 ret = __send_sw(work);
+			 if(ret) goto out;
+
+			 return 0;
+		}
+
+ out:
+		printk("Sending KMSG Failed!\n");
+		return 1;
+}
+
 /* To send kernel messages to the other node */
 
 int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
-  struct sw *work;
+  struct send_work *work;
   int ret;
   DECLARE_COMPLETION_ONSTACK(done);
 
@@ -457,8 +589,8 @@ int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 
   work->done = &done;
 
-
-  ret = __send_sw(work, size);
+  
+  ret = __enq_send(work);
 
   if(ret) goto out;
 
@@ -516,10 +648,10 @@ out:
 int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
-	struct sw *work = rbah->work;
+	struct send_work *work = rbah->work;
 	int ret;
 
-	ret = __xdma_transfer(work->dma_addr, size);
+	ret = __enq_send(work);
 	if(ret)
 	{
 		__put_xdma_send_work(work);
@@ -532,15 +664,14 @@ int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 void xdma_kmsg_put(struct pcn_kmsg_message *msg)
 {
 	struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
-	struct sw *work = rbah->work;
+	struct send_work *work = rbah->work;
 	__put_xdma_send_work(work);
 }
 
 static int __config_pcie(struct pci_dev *dev)
 {
   int ret;
-  ret =  pci_dev_put(pci_dev);
-  if(ret) return ret;
+  pci_dev_put(pci_dev);
   
   ret = pci_enable_device(pci_dev);
   if(ret) return ret;
@@ -568,7 +699,7 @@ void xdma_kmsg_done(struct pcn_kmsg_message *msg)
 
 struct pcn_kmsg_message *xdma_kmsg_get(size_t size)
 {
-	struct sw *work = __get_xdma_send_work(size);
+	struct send_work *work = __get_xdma_send_work(size);
 	struct rb_alloc_header *rbah = work->addr;
 
 	return (struct pcn_kmsg_message *)(rbah + 1);
@@ -593,6 +724,223 @@ void xdma_kmsg_stat(struct seq_file *seq, void *v)
 	}
 }
 
+/*
+static __init int __setup_receive_buffers(void)
+{
+	int ret = 0, i;
+	dma_addr_t dma_addr;
+	char *recv_buffer =  NULL;
+	struct recv_work *rw = NULL;
+	const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
+
+	//Initialize receive buffers 
+
+	recv_buffer = kmalloc(buffer_size, GFP_KERNEL);
+	if(!recv_buffer) {
+		return -ENOMEM;
+	}
+	
+	rw = kmalloc(sizeof(*rw) * MAX_RECV_DEPTH, GFP_KERNEL);
+	if(!rw) {
+		ret = -ENOMEM;
+		goto out_free;
+	}
+
+	dma_addr = __dma_map(recv_buffer, buffer_size, FROM_DEVICE);
+       ret = __verify_dma_mapping(dma_addr);
+	if(ret) goto out_free;
+
+	for(i = 0; i<MAX_RECV_DEPTH; i++) {
+		struct recv_work *rws = rw + i;
+		rws->header.type = WORK_TYPE_RECV;
+		rws->dma_addr = dma_addr + PCN_KMSG_MAX_SIZE * i;
+		rws->addr = recv_buffer + PCN_KMSG_MAX_SIZE * i;
+
+		rws->length = PCN_KMSG_MAX_SIZE;
+	}
+	return ret;
+
+out_free:
+	if(recv_buffer) kfree(recv_buffer);
+	if(rw) kfree(rw);
+	return ret;
+}
+
+static inline int __get_xdma_buffer(void **addr, dma_addr_t *dma_addr)
+{
+	int i;
+	do {
+		spin_lock(&__xdma_slots_lock);
+		i = find_first_zero_bit(__xdma_slots, XDMA_SLOTS);
+		if (i < XDMA_SLOTS) break;
+		spin_unlock(&__xdma_slots_lock);
+		WARN_ON_ONCE("recv buffer is full");
+		io_schedule();
+	} while (i >= XDMA_SLOTS);
+	set_bit(i, __xdma_slots);
+	spin_unlock(&__xdma_slots_lock);
+
+	if (addr) {
+		*addr = __xdma_sink_address + XDMA_SLOT_SIZE * i;
+	}
+	if (dma_addr) {
+		*dma_addr = __xdma_sink_dma_address + XDMA_SLOT_SIZE * i;
+	}
+	return i;
+}
+
+static inline void __put_xdma_buffer(int slot) {
+	spin_lock(&__xdma_slots_lock);
+	clear_bit(slot, __xdma_slots);
+	spin_unlock(&__xdma_slots_lock);
+}
+
+*/
+
+
+static int send_handler(void* arg0)
+{
+	bool was_frozen;
+	MSGPRINTK("Send Handler is ready\n");
+
+	 while (!kthread_freezable_should_stop(&was_frozen))
+	{
+	  while(queue_empty(send_queue));
+	  deq_send(send_queue);
+	}
+
+    return 0;
+}
+
+
+unsigned int queue_size(queue_t* q){
+	if (q == NULL){
+		return - 1;
+	} else {
+		return q->size;
+	}
+}
+
+void free_queue(queue_t* q){
+	int i;
+	for(i = 0; i<q->size; i++)
+	{
+		kfree(q->work_list[i]);
+	}
+			kfree(q->work_list);
+			kfree(q);
+}
+
+static queue_t* __setup_send_queue(int entries)
+{
+	queue_t* send_q = (queue_t*)kmalloc(sizeof(queue_t), GFP_KERNEL);
+	int i;
+	if(!send_q)
+	{
+		goto out;
+	}
+
+	send_q->tail = -1;
+	send_q->head = 0;
+	send_q->size = 0;
+	send_q->nr_entries = entries;
+	send_q->work_list = kmalloc(entries * sizeof(struct send_work *), GFP_KERNEL);
+
+	for(i = 0; i<entries; i++)
+	{
+		send_q->work_list[i] = kmalloc(sizeof(struct send_work), GFP_KERNEL);
+	}
+
+	return send_q;
+
+out:
+	printk("Send Queue Failed\n");
+	return NULL;
+}
+
+static int __update_xdma_index(dma_addr_t dma_addr, size_t size)
+{
+  u32 addr_msb, addr_lsb;
+  if(!KV[page_ix])
+  {
+  	printk("Buffer not yet pinned!\n");
+  	return 1;
+  }
+
+  addr_msb = (u32)((dma_addr & XDMA_MSB_MASK) >> 32);
+  addr_lsb = (u32)(dma_addr & XDMA_LSB_MASK);
+
+  write_register(addr_msb, (u32 *)xdma_bypass + 20);
+  write_register(addr_lsb, (u32 *)xdma_bypass + 21);
+  write_register(size, (u32 *)xdma_bypass + 22);
+
+  return 0;
+}
+
+static int __check_page_index(int i)
+{
+	if(i == XDMA_SLOTS)
+	{
+		if(KV[0] == 0)
+		{
+			printk("Page index updated\n");
+			page_ix = 0;
+			return 0;
+		}
+		else
+		{
+			printk("Receive Buffer Full\n\r");
+			while(KV[0] != 0);
+			page_ix = 0;
+			return 0;
+		}
+	}
+
+	else if(KV[i])
+	{
+		printk("Buffer not unpinned\n\r");
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+
+	return 0;
+}
+
+struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
+{
+	int ret;
+	struct pcn_kmsg_xdma_handle *xh = kmalloc(sizeof(*xh), GFP_KERNEL);
+
+	if(size > XDMA_SLOT_SIZE)
+	{
+		printk("Buffer too large to pin");
+		return ERR_PTR(-EINVAL);
+	}
+
+	ret = __check_page_index(page_ix);
+	if(ret)
+	{
+		printk("Error in the KV\n");
+		return NULL;
+	}
+
+	xh->addr = __xdma_sink_address + XDMA_SLOT_SIZE*page_ix;
+	xh->dma_addr = 	__xdma_sink_dma_address + XDMA_SLOT_SIZE*page_ix;
+	xh->flags = page_ix;
+	KV[page_ix] = 1;
+	page_ix++;
+	return xh;
+}
+
+void xdma_kmsg_unpin_buffer(struct pcn_kmsg_xdma_handle *handle)
+{
+	KV[handle->flags] = 0;
+	kfree(handle);
+}
+
 
 struct pcn_kmsg_transport transport_xdma = {
 	.name = "xdma",
@@ -605,13 +953,15 @@ struct pcn_kmsg_transport transport_xdma = {
 	.post = xdma_kmsg_post,
 	.send = xdma_kmsg_send,
 	.done = xdma_kmsg_done,
-
+	
+	.pin_xdma_buffer = xdma_kmsg_pin_buffer,
+	.unpin_xdma_buffer = xdma_kmsg_unpin_buffer,
   	.xdma_write = xdma_kmsg_write,
   	.xdma_read = xdma_kmsg_read,
 
 };
 
-static u32 __get_node_info(unsigned long addr, size_t size)
+static u32 __get_node_info(void)
 {
 	u32 ret;
 
@@ -619,65 +969,124 @@ static u32 __get_node_info(unsigned long addr, size_t size)
 	return ret;
 }
 
-static void __channel_interrupts_disable(int z)
+static void __channel_interrupts_disable(int z, int x)
 {
   if(z)
     {
-      write_register((u32 *)(xdma_ctl + h2c_ctl), 0x00);
-      read_register((u32 *)(xdma_ctl + h2c_stat));
-      write_register((u32 *)(xdma_ctl + irq_mask), 0x01);
-      write_register((u32 *)(xdma + irq_enable), 0x01);
+      if(!x)
+      {
+      	write_register(0x00,  (u32 *)(xdma_ctl + h2c_ctl));
+       	read_register((u32 *)(xdma_ctl + h2c_stat));
+      	write_register(0x01, (u32 *)(xdma_ctl + irq_mask));
+      	write_register(0x01, (u32 *)(xdma_ctl + irq_enable));
+      }
+      else
+      {
+      	write_register(0x00, (u32 *)(xdma_ctl + ch1_off + h2c_ctl));
+       	read_register((u32 *)(xdma_ctl + ch1_off + h2c_stat));
+      	write_register(0x02, (u32 *)(xdma_ctl + ch1_off + irq_mask));
+      	write_register(0x02, (u32 *)(xdma_ctl + ch1_off + irq_enable));
+      }
     }
   else
     {
-      write_register((u32 *)(xdma_ctl + c2h_ctl), 0x00);
-      read_register((u32 *)(xdma_ctl + c2h_stat));
-      write_register((u32 *)(xdma_ctl + irq_mask), 0x01);
-      write_register((u32 *)(xdma + irq_enable), 0x01);
+       if(!x)
+    	{
+    		write_register(0x00, (u32 *)(xdma_ctl + c2h_ctl));
+      		read_register((u32 *)(xdma_ctl + c2h_stat));
+      		write_register(0x04, (u32 *)(xdma_ctl + irq_mask));
+      		write_register(0x04, (u32 *)(xdma_ctl + irq_enable));
+    	}
+    	else
+    	{
+    		write_register(0x00, (u32 *)(xdma_ctl + ch1_off + c2h_ctl));
+      		read_register((u32 *)(xdma_ctl + ch1_off + c2h_stat));
+      		write_register(0x08, (u32 *)(xdma_ctl + ch1_off + irq_mask));
+      		write_register(0x08, (u32 *)(xdma_ctl + ch1_off + irq_enable));
+    	}
+     
     } 
 }
 
-static void __process_msg(struct xdma_work *xw)
+static void process_msg(struct work_struct *work)
 {
-  pcn_kmsg_process(xw->addr);
+	struct recv_work *rw;
+	rw = container_of(work, struct recv_work, work_q);
+
+	if(!rw) goto out;
+
+	pcn_kmsg_process(rw->addr);
+
+out:
+	printk("Error processing message\n");
 }	
 
-static void __process_received(void)
+static int __process_received(void *addr)
 {
-  struct xdma_work *xw = (struct xdma_work *)sink_buffer;
-  if(!xw)
+  static struct recv_work rw;
+  bool ret;
+
+  INIT_WORK(&rw.work_q, process_msg);
+  rw.addr = addr;
+  ret = queue_work(wq, &rw.work_q);
+
+  if(ret == false)
   {
-  	goto out;
-  }
-  switch(xw->header.type) {
-  	case WORK_TYPE_SEND:
-  		__process_msg(&xw);
-  		break;
-  	case WORK_TYPE_RECV:
-  	case WORK_TYPE_XDMA:
-
-  	default:
-  			printk("Unknown completion\n");
+  	printk("Work already exists\n");
+  	return 1;
   }
 
- out:
- 	printk("Process receive mapping failed\n");
+  return 0;
 }
 
-static __init int __setup_recv_buffer(void)
+static __init queue_t* __setup_recv_buffer(int entries)
+{
+	queue_t* recv_q = (queue_t*)kmalloc(sizeof(queue_t), GFP_KERNEL);
+	int i;
+	if(!recv_q)
+	{
+		goto out;
+	}
+
+	recv_q->tail = -1;
+	recv_q->head = 0;
+	recv_q->size = 0;
+	recv_q->nr_entries = entries;
+	recv_q->work_list = kmalloc(entries * sizeof(struct recv_work *), GFP_KERNEL);
+
+	for(i = 0; i < entries; i++)
+	{
+		recv_q->work_list[i]->header.type = WORK_TYPE_RECV;
+		recv_q->work_list[i]->addr = kmalloc(sizeof(struct recv_work), GFP_KERNEL);
+		recv_q->work_list[i]->length = PCN_KMSG_MAX_SIZE;
+		recv_q->work_list[i]->dma_addr = __dma_map(recv_q->work_list[i]->addr, PCN_KMSG_MAX_SIZE, FROM_DEVICE);
+
+	}
+
+	__update_recv_index(recv_q->work_list[index]->dma_addr, PCN_KMSG_MAX_SIZE);
+
+	return recv_q;
+
+out: 
+	printk("Receive Queue Setup Failed\n");
+	return NULL;
+}
+
+static __init int __setup_xdma_buffer(void)
 {
 	int ret, i;
-	dma_addr_t dma_addr;
-	const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
+	//dma_addr_t dma_addr;
+	//const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
 	const int order = MAX_ORDER - 1;
 
 	__xdma_sink_address = (void *)__get_free_pages(GFP_KERNEL, order);
 	if(!__xdma_sink_address) return -EINVAL;
 
-	__xdma_sink_address = __dma_map(__xdma_sink_address, 1 << (PAGE_SHIFT + order), FROM_DEVICE);
-	ret = __verify_dma_mapping(__xdma_sink_address);
+	__xdma_sink_dma_address = __dma_map(__xdma_sink_address, 1 << (PAGE_SHIFT + order), FROM_DEVICE);
+	ret = __verify_dma_mapping(__xdma_sink_dma_address);
 	if(ret) goto out_free;
 
+	__update_xdma_index(__xdma_sink_dma_address + XDMA_SLOT_SIZE*page_ix, PAGE_SIZE);
 	return 0;
 
 out_free: 
@@ -708,7 +1117,7 @@ static __init int __setup_ring_buffer(void)
 
 	for (i = 0; i < MAX_SEND_DEPTH; i++) 
 	{
-		struct sw *work;
+		struct send_work *work;
 
 		work = kzalloc(sizeof(*work), GFP_KERNEL);
 		if (!work) {
@@ -726,7 +1135,6 @@ static __init int __setup_ring_buffer(void)
 
 	/* Initialize the XDMA work pool */
 
-	__refill_xdma_work(XDMA_SLOTS);
 	return 0;	
 
 out_unmap:
@@ -738,7 +1146,7 @@ out_unmap:
 	}
 	while (send_work_pool) 
 	{
-		struct sw *work = send_work_pool;
+		struct send_work *work = send_work_pool;
 		send_work_pool = work->next;
 		kfree(work);
 	}
@@ -759,17 +1167,36 @@ out_unmap:
 static irqreturn_t xdma_isr(int irq, void *dev_id)
 {
   unsigned long read_irq;
-  
-  read_irq = read_register(intr);
+  int ret;	
+  read_irq = read_register(xdma_ctl + ch_irq);
     
   if(read_irq == 0x01)
   {
-    __channel_interrupts_disable(h2c);
+    __channel_interrupts_disable(h2c, KMSG);
   }
+  else if(read_irq == 0x04)
+  {
+    __channel_interrupts_disable(c2h, KMSG);
+    ret = __process_received(recv_queue->work_list[index]);
+
+    index = __get_index(recv_queue);
+    __update_recv_index(recv_queue->work_list[index]->dma_addr, PCN_KMSG_MAX_SIZE);
+    
+  }
+
   else if(read_irq == 0x02)
   {
-    __channel_interrupts_disable(c2h);
-    __process_received();
+    __channel_interrupts_disable(h2c, PAGE);
+  }
+
+  else if(read_irq == 0x08)
+  {
+    __channel_interrupts_disable(c2h, PAGE);
+    __update_xdma_index(__xdma_sink_dma_address + XDMA_SLOT_SIZE*page_ix, PAGE_SIZE);
+  }
+  else
+  {
+  	printk("Failure in IRQ Disable\n");
   }
 
   return IRQ_HANDLED;
@@ -777,7 +1204,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 
 /* Registering the IRQ Handler */
 
-static int __setup_xdma_handler(void)
+static int __setup_irq_handler(void)
 {
   int ret;
   int irq = pci_dev->irq;
@@ -788,10 +1215,22 @@ static int __setup_xdma_handler(void)
   return 0;
 }  
 
+static int __start_handlers(void)
+{
+  struct task_struct *tsk;
+
+  tsk = kthread_run(send_handler, NULL, "Send_Handler");
+  if(IS_ERR(tsk)) {
+    printk("Error Instantiating Send Handler\n");
+    return 1;
+  }
+
+  return 0;
+}
+
 static void __exit exit_kmsg_xdma(void)
 {
 
-  int nid;
   int i;
 
   /* Detach from messaging layer to avoid race conditions */
@@ -800,13 +1239,10 @@ static void __exit exit_kmsg_xdma(void)
 
   set_popcorn_node_online(nid, false);
 
-  iowrite32(0x00000000, (u32 *)p);
-  iowrite32(0x00000000, (u32 *)p + 1);
-  printk(KERN_INFO "Contents: %x\n", ioread32((u64 *)p));
-  
   //Unmap the physical address
      
-  iounmap(p);
+  iounmap(xdma_ctl);
+  iounmap(xdma_bypass);
 
   free_irq(pci_dev->irq, (void *)(xdma_isr));
 
@@ -818,17 +1254,25 @@ static void __exit exit_kmsg_xdma(void)
 	}
 
 	while (send_work_pool) {
-		struct sw *work = send_work_pool;
+		struct send_work *work = send_work_pool;
 		send_work_pool = work->next;
 		kfree(work);
 	}
 	ring_buffer_destroy(&xdma_send_buff);
+
+	free_queue(send_queue);
+	free_queue(recv_queue);
 
 	while (xdma_work_pool) {
 		struct xdma_work *xw = xdma_work_pool;
 		xdma_work_pool = xw->next;
 		kfree(xw);
 	}
+
+	free_pages((unsigned long)__xdma_sink_address, MAX_ORDER - 1);
+	dma_unmap(__xdma_sink_dma_address, 1 << (PAGE_SHIFT + MAX_ORDER - 1), FROM_DEVICE);
+
+	destroy_workqueue(wq);
 
 	MSGPRINTK("Popcorn message layer over RDMA unloaded\n");
 	return;
@@ -850,7 +1294,7 @@ static int __init init_kmsg_xdma(void)
     goto invalid;
   }
   
-  ctl_address = __pci_map(pci_dev, CTL)
+  ctl_address = __pci_map(pci_dev, CTL);
   if(!ctl_address)
   { 
     MSGPRINTK("XDMA Configuration Failed\n");
@@ -872,12 +1316,12 @@ static int __init init_kmsg_xdma(void)
 
   MSGPRINTK("\n XDMA Layer Configured ...\n");
 
-  i = __get_node_info();
-  printk("Node number: %d\n", i);
+  nid = __get_node_info();
+  printk("Node number: %d\n", nid);
   
-  set_popcorn_node_online(i, true);
+  set_popcorn_node_online(nid, true);
 
-  if(__setup_xdma_handler())
+  if(__setup_irq_handler())
     {
       goto out_free;
     }
@@ -886,10 +1330,33 @@ static int __init init_kmsg_xdma(void)
   	goto out_free;
   }
 
-  if(__setup_recv_buffer())
+  if(__setup_xdma_buffer())
   {
   	goto out_free;
   }
+
+  wq = create_workqueue("recv");
+  if(!wq)
+  {
+  	goto out_free;
+  }
+
+  send_queue = __setup_send_queue(MAX_SEND_DEPTH);
+  if(!send_queue)
+  {
+  	goto out_free;
+  }
+  recv_queue = __setup_recv_buffer(MAX_RECV_DEPTH);
+  if(!recv_queue)
+  {
+  	goto out_free;
+  }
+
+  if(__start_handlers())
+    {
+      goto out_free;
+    }
+  
 
   broadcast_my_node_info(i);
 
@@ -898,13 +1365,13 @@ static int __init init_kmsg_xdma(void)
   return 0;
 
 out:
-	exit_kmsg_xdma();
     MSGPRINTK("PCIe Device not found!!\n");
+    exit_kmsg_xdma();
     return -EINVAL;
 
 invalid: 
+	MSGPRINTK("DMA Bypass not found!..\n");
 	exit_kmsg_xdma();
-    MSGPRINTK("DMA Bypass not found!..\n");
     return -EINVAL;
 
 out_free:
