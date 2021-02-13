@@ -57,7 +57,7 @@ config POPCORN_KMSG_XDMA
 # Test and debug
 config POPCORN_KMSG_TEST
 	tristate "Build test modules"
-	default n
+	default m
 
 config POPCORN_DEBUG_MSG_LAYER
 	bool "Print debug message "

@@ -35,6 +35,9 @@ EXPORT_SYMBOL(set_popcorn_node_online);
 
 
 int my_nid __read_mostly = -1;
+const int origin_nid = 0;
+const int remote_nid = 1;
+
 EXPORT_SYMBOL(my_nid);
 
 const enum popcorn_arch my_arch =
@@ -64,6 +67,8 @@ const char *archs_sz[] = {
 	"riscv64",
 };
 
+#define TRANSFER_WITH_XDMA \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_XDMA)
 
 void broadcast_my_node_info(int nr_nodes)
 {
@@ -72,10 +77,21 @@ void broadcast_my_node_info(int nr_nodes)
 		.nid = my_nid,
 		.arch = my_arch,
 	};
-	for (i = 0; i < nr_nodes; i++) {
-		if (i == my_nid) continue;
-		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+	if(TRANSFER_WITH_XDMA){
+		if(!my_nid)	{
+			PCNPRINTK("This is the origin node\n");
+		}
+		else {
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));
+		}
 	}
+	else {
+		   for (i = 0; i < nr_nodes; i++) {
+			 if (i == my_nid) continue;
+			 pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+		}
+	}
+	
 }
 EXPORT_SYMBOL(broadcast_my_node_info);
 
@@ -92,6 +108,19 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	PCNPRINTK("   %d joined, %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
+	if(TRANSFER_WITH_XDMA){
+		set_popcorn_node_online(info->nid, "true");
+		if(!my_nid) {
+			node_info_t org_info = {
+				.nid = my_nid,
+				.arch = my_arch,
+			};
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, remote_nid, &org_info, sizeof(org_info));
+		}
+		else {
+			PCNPRINTK("This is the remote node\n");
+		}
+	}
 	smp_mb();
 
 	pcn_kmsg_done(msg);

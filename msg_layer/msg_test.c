@@ -413,6 +413,7 @@ static int handle_test_send_response(struct pcn_kmsg_message *msg)
 /**
  * Test RDMA features
  */
+/*
 static int test_rdma_write(void *arg)
 {
 	struct test_params *param = arg;
@@ -474,6 +475,7 @@ static void process_test_rdma_request(struct work_struct *work)
 	free_page((unsigned long)buffer);
 	END_KMSG_WORK(req);
 }
+*/
 
 /**
  * Run tests!
