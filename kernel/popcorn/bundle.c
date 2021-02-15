@@ -108,6 +108,10 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	PCNPRINTK("   %d joined, %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
+	
+	smp_mb();
+	pcn_kmsg_done(msg);
+
 	if(TRANSFER_WITH_XDMA){
 		set_popcorn_node_online(info->nid, "true");
 		if(!my_nid) {
@@ -121,9 +125,7 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 			PCNPRINTK("This is the remote node\n");
 		}
 	}
-	smp_mb();
-
-	pcn_kmsg_done(msg);
+		
 	return 0;
 }
 

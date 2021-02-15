@@ -1,10 +1,7 @@
 /******************************************************************
-
  *msg_xdma.c
  * Messaging transport layer over FPGA interconnect fabric (XDMA + 25G Ethernet Subsystem)
-
  * Authors: Naarayanan <naarayananrao@vt.edu>
-
  ******************************************************************/
 #define _GNU_SOURCE
 
@@ -139,6 +136,8 @@ struct send_work
 	struct completion *done;
 	unsigned long flags;
 };
+
+static struct send_work *curr_sw;
 
 /* Receive Buffer for pcn_kmsg */
 
@@ -516,6 +515,7 @@ static int __send_sw(struct send_work *work)
 
 	while((read_register((u32*)xdma_bypass+0x02)));
 	ret = __xdma_transfer(dma_addr, size, KMSG);
+	curr_sw = work;
 
 	if(ret) return ret;
 
@@ -765,40 +765,32 @@ void xdma_kmsg_stat(struct seq_file *seq, void *v)
    char *recv_buffer =  NULL;
    struct recv_work *rw = NULL;
    const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
-
 //Initialize receive buffers
-
 recv_buffer = kmalloc(buffer_size, GFP_KERNEL);
 if(!recv_buffer) {
 return -ENOMEM;
 }
-
 rw = kmalloc(sizeof(*rw) * MAX_RECV_DEPTH, GFP_KERNEL);
 if(!rw) {
 ret = -ENOMEM;
 goto out_free;
 }
-
 dma_addr = __dma_map(recv_buffer, buffer_size, FROM_DEVICE);
 ret = __verify_dma_mapping(dma_addr);
 if(ret) goto out_free;
-
 for(i = 0; i<MAX_RECV_DEPTH; i++) {
 struct recv_work *rws = rw + i;
 rws->header.type = WORK_TYPE_RECV;
 rws->dma_addr = dma_addr + PCN_KMSG_MAX_SIZE * i;
 rws->addr = recv_buffer + PCN_KMSG_MAX_SIZE * i;
-
 rws->length = PCN_KMSG_MAX_SIZE;
 }
 return ret;
-
 out_free:
 if(recv_buffer) kfree(recv_buffer);
 if(rw) kfree(rw);
 return ret;
 }
-
 static inline int __get_xdma_buffer(void **addr, dma_addr_t *dma_addr)
 {
 int i;
@@ -812,7 +804,6 @@ io_schedule();
 } while (i >= XDMA_SLOTS);
 set_bit(i, __xdma_slots);
 spin_unlock(&__xdma_slots_lock);
-
 if (addr) {
  *addr = __xdma_sink_address + XDMA_SLOT_SIZE * i;
  }
@@ -821,13 +812,11 @@ if (addr) {
  }
  return i;
  }
-
  static inline void __put_xdma_buffer(int slot) {
  spin_lock(&__xdma_slots_lock);
  clear_bit(slot, __xdma_slots);
  spin_unlock(&__xdma_slots_lock);
  }
-
 */
 
 
@@ -1093,6 +1082,15 @@ static void process_msg(struct work_struct *work)
 
 }
 
+static void __process_sent(struct send_work *work)
+{
+	if(work->done)
+	{
+		complete(work->done);
+	}
+	__put_xdma_send_work(work);
+}
+
 static int __process_received(void *addr)
 {
 	static struct recv_work rw;
@@ -1257,6 +1255,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 	{
 		PCNPRINTK("Sent message");
 		__channel_interrupts_disable(h2c, KMSG);
+		__process_sent(curr_sw);
 		
 	}
 	else if(read_irq == 0x04)
