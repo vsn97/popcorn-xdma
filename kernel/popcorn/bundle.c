@@ -77,12 +77,15 @@ void broadcast_my_node_info(int nr_nodes)
 		.nid = my_nid,
 		.arch = my_arch,
 	};
+
 	if(TRANSFER_WITH_XDMA){
 		if(!my_nid)	{
 			PCNPRINTK("This is the origin node\n");
+			return;
 		}
 		else {
 			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));
+			return;
 		}
 	}
 	else {
@@ -114,7 +117,7 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	if(TRANSFER_WITH_XDMA){
 		set_popcorn_node_online(info->nid, "true");
-		if(!my_nid) {
+		if(my_nid == origin_nid) {
 			node_info_t org_info = {
 				.nid = my_nid,
 				.arch = my_arch,
