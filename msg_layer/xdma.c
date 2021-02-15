@@ -677,7 +677,8 @@ int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 	struct send_work *work = rbah->work;
 	int ret;
 
-	PCNPRINTK("Inside xdma post function\n");
+	PCNPRINTK("Inside xdma POST function\n");
+	PCNPRINTK("Contents inside the POST function: %d and %d and %lx\n", msg->header.type, msg->header.from_nid, msg->header.size);
 
 	ret = __enq_send(work);
 	if(ret)
@@ -694,6 +695,7 @@ void xdma_kmsg_put(struct pcn_kmsg_message *msg)
 	struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
 	struct send_work *work = rbah->work;
 	PCNPRINTK("Inside xdma put function\n");
+	PCNPRINTK("Contents inside the PUT function: %d and %d and %lx\n", msg->header.type, msg->header.from_nid, msg->header.size);
 	__put_xdma_send_work(work);
 }
 
@@ -817,7 +819,7 @@ if (addr) {
  clear_bit(slot, __xdma_slots);
  spin_unlock(&__xdma_slots_lock);
  }
-*/
+ */
 
 
 static int send_handler(void* arg0)
@@ -836,15 +838,15 @@ static int send_handler(void* arg0)
 		}
 		else
 		{
-		  	i = deq_send(send_queue);
-		  	if(i) 
-		  	{
-		  		printk("Error sending message\n");
-		  	}
-		  	else
-		  	{
-		  		printk("Sent message from handler\n");
-		  	}
+			i = deq_send(send_queue);
+			if(i)
+			{
+				printk("Error sending message\n");
+			}
+			else
+			{
+				printk("Sent message from handler\n");
+			}
 		}
 	}
 
@@ -1069,14 +1071,14 @@ static void process_msg(struct work_struct *work)
 
 	rw = container_of(work, struct recv_work, work_q);
 
-	if(!rw) 
+	if(!rw)
 	{
 		printk("No RW Created\n");
 	}
 
 	msg = rw->addr;
 
-	PCNPRINTK("Sending message to process: %d\n", msg->header.from_nid);
+	PCNPRINTK("Sending message to process: %d and %d and %lx\n", msg->header.from_nid, msg->header.type, msg->header.size);
 
 	pcn_kmsg_process(msg);
 
@@ -1256,7 +1258,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		PCNPRINTK("Sent message");
 		__channel_interrupts_disable(h2c, KMSG);
 		__process_sent(curr_sw);
-		
+
 	}
 	else if(read_irq == 0x04)
 	{
@@ -1383,7 +1385,7 @@ static void __exit exit_kmsg_xdma(void)
 		kthread_stop(tsk);
 		PCNPRINTK("KThread Stopped\n");
 	}
-	
+
 	PCNPRINTK("Popcorn message layer over XDMA unloaded\n");
 	return;
 }
@@ -1408,7 +1410,7 @@ static int __init init_kmsg_xdma(void)
 	if(ret){
 		goto invalid;
 	}
-	
+
 	PCNPRINTK("Configured PCIe\n");
 
 	ctl_address = __pci_map(pci_dev, CTL);
@@ -1484,7 +1486,7 @@ static int __init init_kmsg_xdma(void)
 	PCNPRINTK("Handlers are setup\n\r");
 
 	broadcast_my_node_info(2);
-	
+
 	PCNPRINTK("... Ready on XDMA ... \n");
 
 	return 0;
