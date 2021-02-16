@@ -538,12 +538,19 @@ static void __put_xdma_work(struct xdma_work *xw)
 
 static int __send_sw(struct send_work *work)
 {
-	int ret;
+	int ret, i;
 	struct pcn_kmsg_message *msg = work->addr;
-
+	void __iomem *g;
 	dma_addr_t dma_addr = work->dma_addr;
 	size_t size = work->length;
 	PCNPRINTK("Inside the __send_sw function: %lx and %llx\n", work->length, work->dma_addr);
+	g = ioremap(work->dma_addr, work->length);
+	PCNPRINTK("___ SW FRAME ___");
+	for(i = 0; i< 25; i++)
+	{
+		printk("%lx\n", read_register((u32 *)g + i));
+	}
+	PCNPRINTK("___ SW FRAME END___");
 	/* To check if the XDMA engine is free */
 
 	while((read_register((u32*)xdma_bypass+0x02)));
