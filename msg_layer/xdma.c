@@ -14,6 +14,7 @@
 #include <asm/msr.h>
 #include <linux/kthread.h>
 #include <asm/io.h>
+#include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <rdma/rdma_cm.h>
@@ -186,7 +187,8 @@ struct queue_r {
 typedef struct queue_r queue_tr;
 
 
-struct rb_alloc_header{
+struct rb_alloc_header
+{
 	struct send_work *work;
 	unsigned int flags;
 	unsigned int magic;
@@ -221,15 +223,11 @@ static inline u32 read_register(void *iomem)
 
 static u64 __dma_map(void *addr, size_t size, int x)
 {
-	if(!x)
-	{
+	if(!x) {
 		return dma_map_single(&pci_dev->dev, addr, size, DMA_TO_DEVICE);
-	}
-	else
-	{
+	} else {
 		return dma_map_single(&pci_dev->dev, addr, size, DMA_FROM_DEVICE);
 	}
-
 }
 
 /* DMA Mapping Error verification */
@@ -243,15 +241,11 @@ static int __verify_dma_mapping(u64 dma_addr)
 
 static void dma_unmap(u64 dma_addr, size_t size, int y)
 {
-	if(!y)
-	{
+	if(!y) {
 		dma_unmap_single(&pci_dev->dev, dma_addr, size, DMA_TO_DEVICE);
-	}
-	else
-	{
+	} else {
 		dma_unmap_single(&pci_dev->dev, dma_addr, size, DMA_FROM_DEVICE);
 	}
-
 }
 
 /* Remapping the kernel physical regions to a kernel virtual address to perform R/W operations */
@@ -540,15 +534,13 @@ static int __send_sw(struct send_work *work)
 {
 	int ret, i;
 	struct pcn_kmsg_message *msg = work->addr;
-	void __iomem *g;
 	dma_addr_t dma_addr = work->dma_addr;
 	size_t size = work->length;
 	PCNPRINTK("Inside the __send_sw function: %lx and %llx\n", work->length, work->dma_addr);
-	g = ioremap(work->dma_addr, work->length);
 	PCNPRINTK("___ SW FRAME ___");
 	for(i = 0; i< 25; i++)
 	{
-		printk("%lx\n", read_register((u32 *)g + i));
+		printk("%lx\n", read_register((u32 *)msg + i));
 	}
 	PCNPRINTK("___ SW FRAME END___");
 	/* To check if the XDMA engine is free */
@@ -886,7 +878,7 @@ static int send_handler(void* arg0)
 	int i;
 	PCNPRINTK("Send Handler is ready\n");
 
-	while (!kthread_freezable_should_stop(&was_frozen))
+	while (!kthread_should_stop())
 	{
 		//printk("Waiting for Send Queue\n");
 		if(queue_empty(send_queue))
@@ -1082,18 +1074,18 @@ static void __channel_interrupts_disable(int z, int x)
 	{
 		if(!x)
 		{
-			write_register(0x00,  (u32 *)(xdma_ctl + h2c_ctl));
-			read_register((u32 *)(xdma_ctl + h2c_stat));
 			write_register(0x01, (u32 *)(xdma_ctl + irq_mask));
+			read_register((u32 *)(xdma_ctl + h2c_stat));
+			write_register(0x00,  (u32 *)(xdma_ctl + h2c_ctl));
 			write_register(0x01, (u32 *)(xdma_ctl + irq_enable));
 			while(read_register(xdma_ctl + ch_irq));
 			PCNPRINTK("Status of IRQ: %lx\n", read_register(xdma_ctl + ch_irq));
 		}
 		else
 		{
-			write_register(0x00, (u32 *)(xdma_ctl + ch1_off + h2c_ctl));
-			read_register((u32 *)(xdma_ctl + ch1_off + h2c_stat));
 			write_register(0x02, (u32 *)(xdma_ctl + ch1_off + irq_mask));
+			read_register((u32 *)(xdma_ctl + ch1_off + h2c_stat));
+			write_register(0x00, (u32 *)(xdma_ctl + ch1_off + h2c_ctl));
 			write_register(0x02, (u32 *)(xdma_ctl + ch1_off + irq_enable));
 			while(read_register(xdma_ctl + ch_irq));
 			PCNPRINTK("Status of IRQ: %lx\n", read_register(xdma_ctl + ch_irq));
@@ -1103,18 +1095,18 @@ static void __channel_interrupts_disable(int z, int x)
 	{
 		if(!x)
 		{
-			write_register(0x00, (u32 *)(xdma_ctl + c2h_ctl));
+		    write_register(0x04, (u32 *)(xdma_ctl + irq_mask));
 			read_register((u32 *)(xdma_ctl + c2h_stat));
-			write_register(0x04, (u32 *)(xdma_ctl + irq_mask));
+		    write_register(0x00, (u32 *)(xdma_ctl + c2h_ctl));
 			write_register(0x04, (u32 *)(xdma_ctl + irq_enable));
 			while(read_register(xdma_ctl + ch_irq));
 			PCNPRINTK("Status of IRQ: %lx\n", read_register(xdma_ctl + ch_irq));
 		}
 		else
 		{
-			write_register(0x00, (u32 *)(xdma_ctl + ch1_off + c2h_ctl));
-			read_register((u32 *)(xdma_ctl + ch1_off + c2h_stat));
 			write_register(0x08, (u32 *)(xdma_ctl + ch1_off + irq_mask));
+			read_register((u32 *)(xdma_ctl + ch1_off + c2h_stat));
+			write_register(0x00, (u32 *)(xdma_ctl + ch1_off + c2h_ctl));
 			write_register(0x08, (u32 *)(xdma_ctl + ch1_off + irq_enable));
 			while(read_register(xdma_ctl + ch_irq));
 			PCNPRINTK("Status of IRQ: %lx\n", read_register(xdma_ctl + ch_irq));
@@ -1156,21 +1148,37 @@ static void __process_sent(struct send_work *work)
 	__put_xdma_send_work(work);
 }
 
-static int __process_received(void *addr)
+static int __process_received(struct recv_work *rws, struct recv_work *rwss)
 {
 	static struct recv_work rw;
+	void *addr;
 	bool ret;
 	int i;
-	PCNPRINTK("Address of the receiver: %llx\n", (unsigned long)addr);
+	PCNPRINTK("Address and DMA of the receiver: %lx and %llx\n", (unsigned long)rws->addr, rws->dma_addr);
+	addr = bus_to_virt(rws->dma_addr);
+	PCNPRINTK("Virtual Address of the DMA Receiver: %lx\n", (unsigned long)addr);
+	PCNPRINTK("___VIRT FRAME ___");
+	for(i = 0; i< 25; i++)
+	{
+		printk("%lx\n", read_register((u32 *)rws->addr + i));
+	}
+	PCNPRINTK("__ VIRT FRAME END __");
 	PCNPRINTK("___RECV FRAME ___");
 	for(i = 0; i< 25; i++)
 	{
 		printk("%lx\n", read_register((u32 *)addr + i));
 	}
 	PCNPRINTK("__ RECV FRAME END __");
+	if(rwss)
+	{
+		PCNPRINTK("___PREV FRAME __");
+		for(i = 0; i<25; i++){
+			printk("%lx\n", read_register((u32 *)rwss->addr + i));
+		}
+	}
 
 	INIT_WORK(&rw.work_q, process_msg);
-	rw.addr = addr;
+	rw.addr = rws->addr;
 	ret = queue_work(wq, &rw.work_q);
 
 	if(ret == false)
@@ -1332,7 +1340,12 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		PCNPRINTK("Received message");
 		__channel_interrupts_disable(c2h, KMSG);
 		index = __get_recv_index(recv_queue);
-		ret = __process_received(recv_queue->work_list[index]->addr);
+		if(!index) {
+			ret = __process_received(recv_queue->work_list[index], NULL);
+		} else {
+			ret = __process_received(recv_queue->work_list[index], recv_queue->work_list[index-1]);
+		}
+		
 		__update_recv_index(recv_queue, index+1);
 
 	}
