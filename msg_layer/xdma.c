@@ -503,7 +503,7 @@ out:
 static struct xdma_work *__get_xdma_work(dma_addr_t dma_addr, size_t size, dma_addr_t raddr)
 {
 	struct xdma_work *xw;
-
+	PCNPRINTK("Inside xdma_get_work function: %llx and %llx and %lx\n", dma_addr, raddr, size);
 	spin_lock(&xdma_work_pool_lock);
 	xw = xdma_work_pool;
 	xdma_work_pool = xdma_work_pool->next;
@@ -690,6 +690,9 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 
 	dma_addr = __dma_map(addr, size, TO_DEVICE);
 	ret = __verify_dma_mapping(dma_addr);
+
+	PCNPRINTK("Done mapping Page: %llx\n", dma_addr);
+
 	BUG_ON(ret);
 
 	xw = __get_xdma_work(dma_addr, size, raddr);
@@ -1011,7 +1014,7 @@ struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 {
 	int ret;
 	struct pcn_kmsg_xdma_handle *xh = kmalloc(sizeof(*xh), GFP_KERNEL);
-
+	PCNPRINTK("Inside the Pin Buffer function\n");
 	if(size > XDMA_SLOT_SIZE)
 	{
 		PCNPRINTK("Buffer too large to pin");
@@ -1019,6 +1022,7 @@ struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 	}
 
 	ret = __check_page_index(page_ix);
+	PCNPRINTK("Pin Index: %d\n", ret);
 	if(ret)
 	{
 		PCNPRINTK("Error in the KV\n");
