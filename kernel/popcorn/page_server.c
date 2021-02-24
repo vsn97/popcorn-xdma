@@ -1065,6 +1065,7 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
+	int i;
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
 	struct pcn_kmsg_rdma_handle *rh;
@@ -1080,6 +1081,12 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			copy_to_user_page(vma, page, addr, paddr, rh->addr, PAGE_SIZE);
 		}
 		else if(TRANSFER_PAGE_WITH_XDMA) {
+			PCNPRINTK("Inside the copy_to_user_page func: %lx\n", (unsigned long)xh->addr);
+			PCNPRINTK("___ Recv Page Frame ___\n");
+			for(i = 0; i<25; i++) {
+				printk("%lx\n", ioread32((u32 *)xh->addr + i));
+			}
+
 			copy_to_user_page(vma, page, addr, paddr, xh->addr, PAGE_SIZE);
 		}
 		 else {

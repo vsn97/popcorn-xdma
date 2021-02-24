@@ -167,6 +167,7 @@ struct pcn_kmsg_rdma_handle {
 struct pcn_kmsg_xdma_handle {
 	void *addr;
 	dma_addr_t dma_addr;
+	void *private;
 	int flags;
 };
 
