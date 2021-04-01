@@ -44,7 +44,7 @@
 #define MAX_RECV_DEPTH	((PAGE_SIZE << (MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
 #define MAX_SEND_DEPTH	(MAX_RECV_DEPTH)
 #define XDMA_SLOT_SIZE PAGE_SIZE * 2
-#define XDMA_SLOTS ((PAGE_SIZE << (MAX_ORDER - 1)) / XDMA_SLOT_SIZE)
+#define XDMA_SLOTS 256
 
 static unsigned int use_rb_thr = PAGE_SIZE / 2;
 
@@ -335,6 +335,7 @@ int queue_full_r(queue_tr* q)
 static void __enq_send(struct send_work *work)
 {
 	while(queue_full(send_queue));
+	PCNPRINTK("Inside enq send\n");
 	send_queue->tail = (send_queue->tail + 1) % send_queue->nr_entries;
 	send_queue->work_list[send_queue->tail] = work;
 	send_queue->size++;
@@ -358,7 +359,7 @@ static int __xdma_transfer(dma_addr_t dmaAddr, size_t size, int x)
 	addr_msb = (u32)((dmaAddr & XDMA_MSB_MASK) >> 32);
 	addr_lsb = (u32)(dmaAddr & XDMA_LSB_MASK);
 
-	//PCNPRINTK("MSB and LSB : %lx and %lx\n", addr_msb, addr_lsb);
+	PCNPRINTK("MSB and LSB : %lx and %lx and %d\n", addr_msb, addr_lsb, x);
 
 	/* KMSGs are sent through Channel 0 and Page data through Channel 1 of XDMA */
 
@@ -366,13 +367,15 @@ static int __xdma_transfer(dma_addr_t dmaAddr, size_t size, int x)
 		write_register(addr_msb, (u32 *)xdma_bypass + 1);
 		write_register(addr_lsb, (u32 *)xdma_bypass + 2);
 		write_register(size, (u32 *)xdma_bypass + 3);
+		PCNPRINTK("Wrote KMSG: %d and %lx and %lx and %lx\n", x, read_register((u32 *)xdma_bypass + 1), read_register((u32 *)xdma_bypass + 2), read_register((u32 *)xdma_bypass + 3));
 	} else {
 		write_register(addr_msb, (u32 *)xdma_bypass + 30);
 		write_register(addr_lsb, (u32 *)xdma_bypass + 31);
 		write_register(size, (u32 *)xdma_bypass + 32);
+		PCNPRINTK("Wrote Page: %d and %lx and %lx and %lx\n", x, read_register((u32 *)xdma_bypass + 30), read_register((u32 *)xdma_bypass + 31), read_register((u32 *)xdma_bypass + 32));
 	}
 
-	//PCNPRINTK("\n Initiating Transfer .... \n");
+	PCNPRINTK("Initiating Transfer .... \n");
 
 	return 0;
 
@@ -506,7 +509,7 @@ static struct xdma_work *__get_xdma_work(dma_addr_t dma_addr, void *addr, size_t
 	xw->addr = addr;
 	xw->length = size;
 	xw->remote_addr = raddr;
-
+	PCNPRINTK("Exiting the xdma_get_work\n");
 	return xw;
 }
 
@@ -528,11 +531,14 @@ static int __send_sw(struct send_work *work)
 	unsigned long flags;
 
 	while(read_register((u32 *)xdma_bypass+2));
+	PCNPRINTK("DMA FREE _SW\n");
 	curr_sw = work;
+	PCNPRINTK("Current work updated sw\n");
 	spin_lock(&xdma_lock);
 	ret = __xdma_transfer(dma_addr, size, KMSG);
+	PCNPRINTK("Returned from xdma trans func sw\n");
 	spin_unlock(&xdma_lock);
-
+	PCNPRINTK("Lock released sw\n");
 	if(ret) return ret;
 
 	return 0;
@@ -573,7 +579,7 @@ static void __put_xdma_send_work(struct send_work *work)
 	work->next = send_work_pool;
 	send_work_pool = work;
 	spin_unlock_irqrestore(&send_work_pool_lock, flags);
-	//PCNPRINTK("Exiting the put xdma send work");
+	PCNPRINTK("Exiting the put xdma send work");
 }
 
 
@@ -662,11 +668,14 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 	xw->done = &done;
 
 	while(read_register((u32 *)xdma_bypass+31));
+	PCNPRINTK("DMA FREE _XW\n");
 	curr_xw = xw;
+	PCNPRINTK("Current xw is updated\n");
 	spin_lock(&xdma_lock);
 	ret = __xdma_transfer(dma_addr, size, PAGE);
+	PCNPRINTK("Returned from xdma trans func xw\n");
 	spin_unlock(&xdma_lock);
-
+	PCNPRINTK("Lock released xw\n");
 	if(ret) {
 		PCNPRINTK("Cannot do XDMA KMSG write\n");
 		goto out;
@@ -846,7 +855,7 @@ out:
 	return NULL;
 }
 
-static int __update_xdma_index(dma_addr_t dma_addr, size_t size)
+static void __update_xdma_index(dma_addr_t dma_addr, size_t size)
 {
 	u32 addr_msb, addr_lsb;
 	//PCNPRINTK("Inside the xdma_index function: %llx\n", dma_addr);
@@ -856,8 +865,6 @@ static int __update_xdma_index(dma_addr_t dma_addr, size_t size)
 	write_register(addr_msb, (u32 *)xdma_bypass + 20);
 	write_register(addr_lsb, (u32 *)xdma_bypass + 21);
 	write_register(size, (u32 *)xdma_bypass + 22);
-	++page_ix;
-	return 0;
 }
 
 static int __check_page_index(int i)
@@ -906,6 +913,7 @@ struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 	KV[page_ix] = 1;
 
 	__update_xdma_index(xh->dma_addr, PAGE_SIZE);
+	++page_ix;
 	spin_unlock(&__xdma_slots_lock);
 	return xh;
 }
