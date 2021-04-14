@@ -11,7 +11,7 @@ obj-$(CONFIG_POPCORN_KMSG_RDMA) += msg_rdma.o
 msg_rdma-y := rdma.o ring_buffer.o
 
 obj-$(CONFIG_POPCORN_KMSG_XDMA) += msg_xdma.o
-msg_xdma-y := xdma.o ring_buffer.o
+msg_xdma-y := xdma.o ring_buffer.o pcie.o
 
 #obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
 #msg_ib-y := ib.o
