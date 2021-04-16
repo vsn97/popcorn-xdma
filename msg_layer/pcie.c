@@ -88,7 +88,6 @@ void __channel_interrupts_disable(int z, int x)
 			write_register(0x01, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + h2c_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
-			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x01, (u32 *)(xdma_ctl + ch_irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
 		} else {
 
@@ -96,7 +95,6 @@ void __channel_interrupts_disable(int z, int x)
 			write_register(0x02, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + h2c1_stat));
 			//i = ioread32((u32 *)(xdma_ctl + irq_enable));
-			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x02, (u32 *)(xdma_ctl + ch_irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
 		}
 	} else {
@@ -106,7 +104,6 @@ void __channel_interrupts_disable(int z, int x)
 		    write_register(0x04, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + c2h_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
-			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x04, (u32 *)(xdma_ctl + ch_irq_enable));
 			//PCNPRINTK("Pending Interrupts: %d\n", read_register(xdma_ctl + ch_irq_pending));
 			//while(read_register(xdma_ctl + ch_irq));
 		} else {
@@ -115,8 +112,37 @@ void __channel_interrupts_disable(int z, int x)
 			write_register(0x08, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + c2h1_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
-			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x08, (u32 *)(xdma_ctl + ch_irq_enable));
+			//while(read_register(xdma_ctl + ch_irq) | 0x08);
+		}
+	}
+
+	//PCNPRINTK("Exiting channel interrupts disable\n");
+}
+
+void __channel_interrupts_enable(int z, int x)
+{
+	int i;
+	//PCNPRINTK("Inside channel interrupts disable\n");
+	if(z) {
+		if(!x) {
+			//i = read_register((u32 *)(xdma_ctl + irq_enable));
+			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x01, (u32 *)(xdma_ctl + ch_irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
+		} else {
+			//i = ioread32((u32 *)(xdma_ctl + irq_enable));
+			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x02, (u32 *)(xdma_ctl + ch_irq_enable));
+			//while(read_register(xdma_ctl + ch_irq));
+		}
+	} else {
+		if(!x) {
+
+			//i = read_register((u32 *)(xdma_ctl + irq_enable));
+			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x04, (u32 *)(xdma_ctl + ch_irq_enable));
+
+		} else {
+
+			//i = read_register((u32 *)(xdma_ctl + irq_enable));
+			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x08, (u32 *)(xdma_ctl + ch_irq_enable));
 		}
 	}
 
@@ -127,10 +153,20 @@ void __user_interrupts_disable(int x)
 {
 	if(!x) {
 		write_register(0x01, (u32 *)(xdma_ctl + usr_irq_mask));
+		
+	} else {
+		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
+
+	}
+
+}
+
+void __user_interrupts_enable(int x)
+{
+	if(!x) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x01, (u32 *)(xdma_ctl + usr_irq_enable));
 
 	} else {
-		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
 	}
 

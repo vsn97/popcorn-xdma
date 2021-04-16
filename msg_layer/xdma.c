@@ -37,7 +37,7 @@ static unsigned int use_rb_thr = PAGE_SIZE / 2;
 
 unsigned long ctl_address;
 unsigned long axi_address;
-
+static int j = 0;
 void __iomem *xdma_x;
 void __iomem *xdma_c;
 
@@ -829,9 +829,9 @@ struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 	xh->dma_addr =	__xdma_sink_dma_address + XDMA_SLOT_SIZE * page_ix;
 	xh->flags = page_ix;
 	KV[page_ix] = 1;
-	//PCNPRINTK("Pin Index and DMA Address: %d and %llx\n", page_ix, xh->dma_addr);
 	__update_xdma_index(xh->dma_addr, PAGE_SIZE);
 	page_ix += 1;
+	//PCNPRINTK("Pin Index and DMA Address: %d and %llx\n", page_ix, xh->dma_addr);
 	spin_unlock(&__xdma_slots_lock);
 	return xh;
 }
@@ -994,6 +994,7 @@ static __init int __setup_xdma_buffer(void)
 
 	//PCNPRINTK("Buffer Setup: %llx\n", __xdma_sink_dma_address);
 
+	//__update_xdma_index(__xdma_sink_dma_address + XDMA_SLOT_SIZE * page_ix, PAGE_SIZE);
 	return 0;
 
 out_free:
@@ -1074,16 +1075,22 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 	int ret, index, recv_i;
 	read_ch_irq = read_register(xdma_c + ch_irq);
 	read_usr_irq = read_register(xdma_c + usr_irq);
-
+	
+	//PCNPRINTK("IRQ Status: %d and %d and %d\n", read_ch_irq, read_usr_irq, j);
 	if(read_usr_irq & 0x02) {
 		//PCNPRINTK("Received Page in FIFO: %x\n", read_usr_irq);
 		__user_interrupts_disable(PAGE);
 		ret = xdma_transfer(FROM_DEVICE, PAGE);
+		__user_interrupts_enable(PAGE);
 		//PCNPRINTK("Transfer done\n");
+		//return IRQ_HANDLED;
+
 	} else if(read_ch_irq & 0x01) {
 		__channel_interrupts_disable(TO_DEVICE, KMSG);
 		__process_sent(curr_sw);
+		__channel_interrupts_enable(TO_DEVICE, KMSG);
 		//PCNPRINTK("Sent message: %x\n", read_ch_irq);		
+		//return IRQ_HANDLED;
 
 	} else if(read_ch_irq & 0x04) {
 
@@ -1094,17 +1101,23 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		if(recv_queue->size == recv_queue->nr_entries) {
 			recv_queue->size = 0;
 		}
+		__channel_interrupts_enable(FROM_DEVICE, KMSG);
 
+		//return IRQ_HANDLED;
 		//PCNPRINTK("Received message: %x\n", read_ch_irq);
 	
 	} else if(read_ch_irq & 0x02) {
 		__channel_interrupts_disable(TO_DEVICE, PAGE);
 		__page_sent(curr_xw);
+		__channel_interrupts_enable(TO_DEVICE, PAGE);
 		//PCNPRINTK("Sent page: %x\n", read_ch_irq);	
+		//return IRQ_HANDLED;
 		
 	} else if(read_ch_irq & 0x08) {
 		__channel_interrupts_disable(FROM_DEVICE, PAGE);
+		__channel_interrupts_enable(FROM_DEVICE, PAGE);
 		//PCNPRINTK("Received Page: %x\n", read_ch_irq);
+		//return IRQ_HANDLED;
 		
 	} else if(read_usr_irq & 0x01) {
 		//PCNPRINTK("Received in FIFO: %x\n", read_usr_irq);
@@ -1113,13 +1126,15 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		//PCNPRINTK("Transfer done\n");
 		index = __get_recv_index(recv_queue);
 		__update_recv_index(recv_queue, index + 1);
-
+		__user_interrupts_enable(KMSG);
+		//return IRQ_HANDLED;
 
 	} else {
-		PCNPRINTK("Failure in IRQ Disable: %d and %d\n", read_ch_irq, read_usr_irq);
+		//PCNPRINTK("Failure in IRQ Disable: %d and %d and %d and %d and %d\n", read_ch_irq, read_usr_irq, j, read_register((u32 *)(xdma_c + ch_irq_pending)), read_register((u32 *)(xdma_c + usr_irq_pending)));
+		//return IRQ_HANDLED;
 	}
-	
-return IRQ_HANDLED;
+	//j+= 1;
+	return IRQ_HANDLED;
 }
 
 /* Registering the IRQ Handler */
@@ -1272,7 +1287,7 @@ static int __init init_kmsg_xdma(void)
 	
 	PCNPRINTK("\n XDMA Layer Configured ...\n");
 
-	my_nid = 0;
+	my_nid = 1;
 	PCNPRINTK("Node number: %d\n", my_nid);
 
 	set_popcorn_node_online(my_nid, true);

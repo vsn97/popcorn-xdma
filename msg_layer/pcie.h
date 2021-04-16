@@ -111,7 +111,7 @@
 #define length4 desc_byp4 + 0x14
 #define N4 desc_byp4 + 0x18
 
-#define thresh 1024
+#define thresh 400
 
 
 void write_register(u32 value, void *iomem);
@@ -121,4 +121,6 @@ int xdma_transfer(int y, int z);
 int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z);
 void __channel_interrupts_disable(int z, int x);
 void __user_interrupts_disable(int x);
+void __channel_interrupts_enable(int z, int x);
+void __user_interrupts_enable(int x);
 #endif
