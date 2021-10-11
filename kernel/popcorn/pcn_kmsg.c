@@ -72,6 +72,17 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_process);
 
+int check_msg_type(struct pcn_kmsg_message *msg)
+{
+	if(msg != NULL){
+		return msg->header.type;
+	} else {
+		PCNPRINTK("Message is nULl\n");
+	}
+	
+}
+
+EXPORT_SYMBOL(check_msg_type);
 
 static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
@@ -202,6 +213,37 @@ void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 }
 EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
+/* XDMA Features */
+
+struct pcn_kmsg_xdma_handle *pcn_kmsg_pin_xdma_buffer(void *buffer, size_t size)
+{
+	if (transport && transport->pin_xdma_buffer) {
+		return transport->pin_xdma_buffer(buffer, size);
+	}
+	return ERR_PTR(-EINVAL);
+}
+EXPORT_SYMBOL(pcn_kmsg_pin_xdma_buffer);
+
+void pcn_kmsg_unpin_xdma_buffer(struct pcn_kmsg_xdma_handle *handle)
+{
+	if (transport && transport->unpin_xdma_buffer) {
+		transport->unpin_xdma_buffer(handle);
+	}
+}
+EXPORT_SYMBOL(pcn_kmsg_unpin_xdma_buffer);
+
+
+int pcn_kmsg_xdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size)
+{
+	return transport->xdma_read(from_nid, addr, rdma_addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_xdma_read);
+
+int pcn_kmsg_xdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size)
+{
+    return transport->xdma_write(dest_nid, rdma_addr, addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_xdma_write);
 
 void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 {

@@ -42,6 +42,8 @@ const int redirect_table[PCN_NUM_SYSCALLS] = {
   __NR_statx,
   __NR_pselect6,
   __NR_clock_gettime,
+  __NR_nanosleep,
+  __NR_futex
 };
 
 const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
@@ -75,6 +77,7 @@ const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
   "statx",
   "pselect6",
   "clock_gettime",
+  "nanosleep",
   "unsupported",
 };
 

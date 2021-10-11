@@ -192,6 +192,8 @@ enum pcn_syscall_types
 	PCN_SYSCALL_STATX,
 	PCN_SYSCALL_PSELECT6,
 	PCN_SYSCALL_GETTIME,
+	PCN_SYSCALL_NANOSLEEP,
+	PCN_SYSCALL_FUTEX,
 	PCN_NUM_SYSCALLS
 };
 
@@ -256,7 +258,8 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	pid_t origin_pid; \
 	int origin_ws; \
 	unsigned long addr; \
-	int result;
+	int result; \
+	unsigned long pkey;
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
@@ -301,7 +304,8 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
 	pid_t origin_pid; \
 	int origin_ws; \
-	pid_t remote_pid;
+	pid_t remote_pid; \
+	unsigned long pkey;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
 

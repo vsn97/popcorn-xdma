@@ -23,7 +23,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf);
 /*
  * Flush pages in remote to the origin
  */
-int page_server_flush_remote_pages(void);
+//int page_server_flush_remote_pages(void);
 
 void page_server_zap_pte(
 	struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval);
@@ -34,8 +34,20 @@ void page_server_put_userpage(struct fault_handle *fh, char *mode);
 void page_server_start_mm_fault(unsigned long address);
 int page_server_end_mm_fault(int ret);
 
+void xdma_invalidate_request_handler(unsigned long addr, pid_t rpid, pid_t opid, int ws_id, int nid);
+
 void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val);
 
 int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long addr);
+
+/* Prot Proc Functions */
+
+void xdma_process_remote_page_req(unsigned long vaddr, unsigned long iaddr,unsigned long dma_addr,unsigned long fault_flags,unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x);
+void xdma_process_invalidate_req(unsigned long addr, unsigned long iaddr, unsigned long fault_flags,unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid);
+
+
+//void insert_pkey(unsigned long pkey, unsigned long addr);
+void update_pkey(unsigned long pkey, unsigned long addr);
+void delete_pkeys(void);
 
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */
