@@ -184,5 +184,6 @@ void prot_proc_handle_inval(void);
 
 unsigned long current_pkey(void);
 void resolve_waiting(int ws_id);
+void pending(void);
 
 #endif

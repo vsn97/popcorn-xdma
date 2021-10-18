@@ -608,7 +608,7 @@ out:
 int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 {
 
-	DECLARE_COMPLETION_ONSTACK(done);
+	//DECLARE_COMPLETION_ONSTACK(done);
 	struct xdma_work *xw;
 	dma_addr_t dma_addr;
 	int ret;
@@ -630,9 +630,9 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 	xw = __get_xdma_work(dma_addr, addr, size, raddr);
 	BUG_ON(!xw);
 	//PCNPRINTK("Got the xdma work\n");
-	xw->done = &done;
+	//xw->done = &done;
 	//PCNPRINTK("Page to be sent: %llx \n", xw->dma_addr);
-	curr_xw = xw;
+	//curr_xw = xw;
 	ret = config_descriptors_bypass(xw->dma_addr, size, TO_DEVICE, PAGE);
 	ret = xdma_transfer(TO_DEVICE, PAGE);
 	if(ret) {
@@ -640,10 +640,9 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 		goto out;
 	}
 
-	if(!try_wait_for_completion(&done)) {
+	/* if(!try_wait_for_completion(&done)) {
 		wait_for_completion(&done);
-	}
-
+	}*/
 	//PCNPRINTK("Page Write done\n");
 
 out:
@@ -973,7 +972,7 @@ static void prot_handle_rpr(struct work_struct *work)
 	int x;
 	struct prot_work *pw = (struct prot_work *)work;
 	x = pw->x;
-	PCNPRINTK("Inside the prot_proc_handle func Work: %d\n", x);
+	//PCNPRINTK("Inside the prot_proc_handle func Work: %d\n", x);
 	prot_proc_handle_rpr(x);
 	kfree((void *)work);
 }
@@ -981,7 +980,7 @@ static void prot_handle_rpr(struct work_struct *work)
 static void prot_handle_inval(struct work_struct *work)
 {
 	//struct prot_work *pw = (struct prot_work *)work;
-	PCNPRINTK("Inside the prot_proc_handle Inval func Work\n");
+	//PCNPRINTK("Inval Intr\n");
 	prot_proc_handle_inval();
 	kfree((void *)work);
 }
@@ -993,22 +992,22 @@ static void __prot_proc_recv(int x)
 	struct prot_work *work;
 	int ret;
 
-	PCNPRINTK("Inside the prot_proc_recv Work: %d\n", x);
+	//PCNPRINTK("Inside the prot_proc_recv Work: %d\n", x);
 	work = kmalloc(sizeof(*work), GFP_ATOMIC);
 
 	if(x == PGINVAL) {
-		PCNPRINTK("Queueing inval work\n");
+		//PCNPRINTK("Queueing inval work\n");
 		INIT_WORK((struct work_struct *)work, prot_handle_inval);
 		work->x = x;
 		ret = queue_work(wq, (struct work_struct *)work);
 	} else {
-		PCNPRINTK("Queueing rpr work\n");
+		//PCNPRINTK("Queueing rpr work\n");
 		INIT_WORK((struct work_struct *)work, prot_handle_rpr);
 		work->x = x;
 		ret = queue_work(wq, (struct work_struct *)work);
 	}
 
-	PCNPRINTK("Queued Work\n");
+	//PCNPRINTK("Queued Work\n");
 	if(ret == false) {
 		PCNPRINTK("Work already exists\n");
 	}
@@ -1157,7 +1156,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		channel_interrupts_disable(TO_DEVICE, KMSG);
 		__process_sent(curr_sw);
 		channel_interrupts_enable(TO_DEVICE, KMSG);
-		PCNPRINTK("Sent message: %x\n", read_ch_irq);		
+		//PCNPRINTK("Sent message: %x\n", read_ch_irq);		
 		//return IRQ_HANDLED;
 
 	} else if(read_ch_irq & 0x04) {
@@ -1176,15 +1175,15 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 	
 	} else if(read_ch_irq & 0x02) {
 		channel_interrupts_disable(TO_DEVICE, PAGE);
-		__page_sent(curr_xw);
+		//__page_sent(curr_xw);
 		channel_interrupts_enable(TO_DEVICE, PAGE);
-		PCNPRINTK("Sent page: %x\n", read_ch_irq);	
+		//PCNPRINTK("Sent page: %x\n", read_ch_irq);	
 		//return IRQ_HANDLED;
 		
 	} else if(read_ch_irq & 0x08) {
 		channel_interrupts_disable(FROM_DEVICE, PAGE);
 		channel_interrupts_enable(FROM_DEVICE, PAGE);
-		PCNPRINTK("Received Page: %x\n", read_ch_irq);
+		//PCNPRINTK("Received Page: %x\n", read_ch_irq);
 		//return IRQ_HANDLED;
 		
 	} else if(read_usr_irq & 0x01) {
@@ -1218,9 +1217,9 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(FAULT);
 		//return IRQ_HANDLED;
 
-	} else if(read_usr_irq & 0x20) {
+	} /* else if(read_usr_irq & 0x20) {
 		user_interrupts_disable(MKWRITE);
-		PCNPRINTK("MKWRITE intr: %x\n", read_usr_irq);
+		//PCNPRINTK("MKWRITE intr: %x\n", read_usr_irq);
 		//ws_id = (int)ioread32((u32 *)(xdma_x + proc_ws_id));
 		//PCNPRINTK("WS ID: %d\n", ws_id);
 		//resolve_waiting(ws_id);
@@ -1229,21 +1228,21 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 
 	} else if(read_usr_irq & 0x40) {
 		user_interrupts_disable(FETCH);
-		PCNPRINTK("Fetch intr: %x\n", read_usr_irq);
-		pkey = ((unsigned long) ioread32((u32 *)(xdma_x + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_x + wr_pkey_lsb)));
-		addr = ((unsigned long) ioread32((u32 *)(xdma_x + proc_vaddr_msb)) << 32 | ioread32((u32 *)(xdma_x + proc_vaddr_lsb)));
-		update_pkey(pkey, addr);
+		//PCNPRINTK("Fetch intr: %x\n", read_usr_irq);
+		//pkey = ((unsigned long) ioread32((u32 *)(xdma_x + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_x + wr_pkey_lsb)));
+		//addr = ((unsigned long) ioread32((u32 *)(xdma_x + proc_vaddr_msb)) << 32 | ioread32((u32 *)(xdma_x + proc_vaddr_lsb)));
+		//update_pkey(pkey, addr);
 		user_interrupts_enable(FETCH);
 		//return IRQ_HANDLED;
 
-	}  else if(read_usr_irq & 0x80) {
+	}*/ else if(read_usr_irq & 0x20) {
 		user_interrupts_disable(RPR_WR);
 		PCNPRINTK("RPR Wr intr: %x\n", read_usr_irq);
 		__prot_proc_recv(PGWRITE);
 		user_interrupts_enable(RPR_WR);
 		//return IRQ_HANDLED;
 
-	}  else if(read_usr_irq & 0x100) {
+	}  else if(read_usr_irq & 0x40) {
 		user_interrupts_disable(VMFC);
 		PCNPRINTK("VMF Continue intr: %x\n", read_usr_irq);
 		__prot_proc_recv(VMF_CONTINUE);
@@ -1265,7 +1264,7 @@ static int __setup_irq_handler(void)
 	int ret;
 	int irq = pci_dev->irq;
 
-	ret = request_irq(irq, xdma_isr, 0, "PCN_XDMA", (void *)(xdma_isr));
+	ret = request_irq(irq, xdma_isr, IRQF_TRIGGER_RISING, "PCN_XDMA", (void *)(xdma_isr));
 	if(ret) return ret;
 
 	//PCNPRINTK("Interrupt Handler Registered Successfully\n");

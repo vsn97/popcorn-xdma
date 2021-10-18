@@ -79,7 +79,7 @@ int init_xdma(void)
 	write_register(0x04, xdma_ctl + c2h1intr);
 
 	write_register(0x0F, xdma_ctl + ch_irqen);
-	write_register(0x1FF, xdma_ctl + usr_irqen);
+	write_register(0x7F, xdma_ctl + usr_irqen);
 
 	return (read_register(xdma_ctl + h2c_ctl) || read_register(xdma_ctl + h2c1_ctl) || 
 		read_register(xdma_ctl + c2h_ctl) || read_register(xdma_ctl + c2h1_ctl));
@@ -204,7 +204,7 @@ void user_interrupts_disable(int x)
 		write_register(0x10, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
 		write_register(0x08, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == MKWRITE){
+	} /* else if(x == MKWRITE){
 		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
 		write_register(0x20, (u32 *)(xdma_axi + proc_mask));
@@ -212,11 +212,11 @@ void user_interrupts_disable(int x)
 		write_register(0x40, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
 		write_register(0x10, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == RPR_WR){
-		write_register(0x80, (u32 *)(xdma_ctl + usr_irq_mask));
+	} */ else if(x == RPR_WR){
+		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else if(x == VMFC){
-		write_register(0x100, (u32 *)(xdma_ctl + usr_irq_mask));
+		write_register(0x40, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_disable\n");
@@ -241,17 +241,17 @@ void user_interrupts_enable(int x)
 	} else if(x == FAULT) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x10, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == MKWRITE) {
+	} /* else if(x == MKWRITE) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if(x == FETCH) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x40, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == RPR_WR) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x80, (u32 *)(xdma_ctl + usr_irq_enable));
+	} */ else if(x == RPR_WR) {
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if(x == VMFC) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x100, (u32 *)(xdma_ctl + usr_irq_enable));
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x40, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_enable\n");
@@ -358,22 +358,22 @@ EXPORT_SYMBOL(xdma_transfer);
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, unsigned long pkey, 
 	pid_t opid, pid_t rpid, int from_nid, unsigned long fflags, int ws_id, int tsk_remote)
 {	    
-		PCNPRINTK("Inside the prot_proc handle localfault func: %d and %d and %d and %llx and %llx and %llx\n", ws_id, opid, tsk_remote, fflags, vmf, vaddr);
+		//PCNPRINTK("Inside the prot_proc handle localfault func: %d and %d and %d and %llx and %llx and %llx\n", ws_id, opid, tsk_remote, fflags, vmf, vaddr);
 
 		//write_register((u32)((vmf & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_vmf_msb));
 		//write_register((u32)(vmf & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_vmf_lsb));
   		write_register((u32)((dma_addr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_daddr_msb));
 		write_register((u32)(dma_addr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_daddr_lsb));
-		PCNPRINTK("Wrote the DMA Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_daddr_msb)), ioread32((u32 *)(xdma_axi + proc_daddr_lsb)));
+		//PCNPRINTK("Wrote the DMA Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_daddr_msb)), ioread32((u32 *)(xdma_axi + proc_daddr_lsb)));
 		write_register((u32)((vaddr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_vaddr_msb));
 		write_register((u32)(vaddr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_vaddr_lsb));
-		PCNPRINTK("Wrote the V Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_vaddr_msb)), ioread32((u32 *)(xdma_axi + proc_vaddr_lsb)));
+		//PCNPRINTK("Wrote the V Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_vaddr_msb)), ioread32((u32 *)(xdma_axi + proc_vaddr_lsb)));
 		write_register((u32)((fflags & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_fflags_msb));
 		write_register((u32)(fflags & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_fflags_lsb));
-		PCNPRINTK("Wrote the FF Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_fflags_msb)), ioread32((u32 *)(xdma_axi + proc_fflags_lsb)));
+		//PCNPRINTK("Wrote the FF Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_fflags_msb)), ioread32((u32 *)(xdma_axi + proc_fflags_lsb)));
 		write_register((u32)((iaddr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_iaddr_msb));
 		write_register((u32)(iaddr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_iaddr_lsb));
-		PCNPRINTK("Wrote the I Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_iaddr_msb)), ioread32((u32 *)(xdma_axi + proc_iaddr_lsb)));
+		//PCNPRINTK("Wrote the I Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_iaddr_msb)), ioread32((u32 *)(xdma_axi + proc_iaddr_lsb)));
 		if(pkey){
 			write_register((u32)((pkey & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_pkey_msb));
 			write_register((u32)(pkey & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_pkey_lsb));
@@ -382,26 +382,25 @@ void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_add
 			write_register(0x00000000, (u32 *)(xdma_axi + proc_pkey_lsb));
 		}
 		
-		PCNPRINTK("Wrote the PKEY: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_pkey_msb)), ioread32((u32 *)(xdma_axi + proc_pkey_lsb)));
+		//PCNPRINTK("Wrote the PKEY: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_pkey_msb)), ioread32((u32 *)(xdma_axi + proc_pkey_lsb)));
 		write_register(ws_id, (u32 *)(xdma_axi + proc_ws_id));
 		write_register(opid, (u32 *)(xdma_axi + proc_opid));
 		write_register(rpid, (u32 *)(xdma_axi + proc_rpid));
-		PCNPRINTK("Wrote the WSID, OPID and PID: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + proc_ws_id)), ioread32((u32 *)(xdma_axi + proc_opid)), ioread32((u32 *)(xdma_axi + proc_rpid)));
+		//PCNPRINTK("Wrote the WSID, OPID and PID: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + proc_ws_id)), ioread32((u32 *)(xdma_axi + proc_opid)), ioread32((u32 *)(xdma_axi + proc_rpid)));
 		//write_register(pkey, (u32 *)(xdma_axi + proc_pkey));
 		write_register(from_nid, (u32 *)(xdma_axi + proc_nid));
-		PCNPRINTK("Request from_nid: %d\n", ioread32((u32 *)(xdma_axi + proc_nid)));
- 		PCNPRINTK("Wrote everything except control: %lx\n", ioread32((u32 *)(xdma_axi + proc_ctl)));
+		//PCNPRINTK("Request from_nid: %d\n", ioread32((u32 *)(xdma_axi + proc_nid)));
+ 		//PCNPRINTK("Wrote everything except control: %lx\n", ioread32((u32 *)(xdma_axi + proc_ctl)));
  		if(tsk_remote) {
- 			PCNPRINTK("TSK @ REMOTE\n");
+ 			//PCNPRINTK("TSK @ REMOTE\n");
  			write_register(0x8001, (u32 *)(xdma_axi + proc_ctl));
  		}
  		else {
- 			PCNPRINTK("TSK @ ORIGIN\n");
+ 			//PCNPRINTK("TSK @ ORIGIN\n");
  			write_register(0x01, (u32 *)(xdma_axi + proc_ctl));
  		}
-
- 		PCNPRINTK("Done writing the info: %lx\n", ioread32((u32 *)(xdma_axi + proc_ctl)));
-
+ 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
+ 		//PCNPRINTK("Done writing the info: %lx\n", ioread32((u32 *)(xdma_axi + proc_ctl)));
 }
 
 EXPORT_SYMBOL(prot_proc_handle_localfault);
@@ -414,9 +413,9 @@ void prot_proc_handle_rpr(int x)
 	int ws_id, nid;
 	pid_t rpid, opid;
 	dma_addr_t dma_addr;
-	PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
-		ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
-	PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
+	//PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
+		//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
+	//PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
 	ws_id = (int)ioread32((u32 *)(xdma_axi + wr_wsid));
 	rpid = (pid_t)ioread32((u32 *)(xdma_axi + wr_rpid));
 	opid = (pid_t)ioread32((u32 *)(xdma_axi + wr_opid));
@@ -427,7 +426,7 @@ void prot_proc_handle_rpr(int x)
 	fault_flags = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	pkey = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
 
-	PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
+	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
 	xdma_process_remote_page_req(vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid, x);
 }
@@ -442,10 +441,10 @@ void prot_proc_handle_inval()
 	int ws_id, nid;
 	pid_t rpid, opid;
 	dma_addr_t dma_addr;
-	PCNPRINTK("Inside the prot_Proc Invalidate func\n");
-	PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
-		ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
-	PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
+	//PCNPRINTK("Inside the prot_Proc Invalidate func\n");
+	//PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
+		//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
+	//PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
 	ws_id = (int)ioread32((u32 *)(xdma_axi + wr_wsid));
 	rpid = (pid_t)ioread32((u32 *)(xdma_axi + wr_rpid));
 	opid = (pid_t)ioread32((u32 *)(xdma_axi + wr_opid));
@@ -456,7 +455,7 @@ void prot_proc_handle_inval()
 	fault_flags = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	pkey = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
 
-	PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
+	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
 	xdma_process_invalidate_req(vaddr, iaddr, fault_flags, pkey, rpid, opid, ws_id, nid);
 }
@@ -468,7 +467,7 @@ EXPORT_SYMBOL(prot_proc_handle_inval);
 void write_mynid(int nid)
 {
 	write_register(nid, (u32 *) (xdma_axi + proc_mynid));
-	PCNPRINTK("Prot proc my_nid: %d\n", read_register((u32 *)(xdma_axi + proc_mynid)));
+	//PCNPRINTK("Prot proc my_nid: %d\n", read_register((u32 *)(xdma_axi + proc_mynid)));
 }
 
 EXPORT_SYMBOL(write_mynid);
@@ -486,9 +485,9 @@ void resolve_waiting(int ws_id)
 {
 	struct wait_station *ws;
 	ws = wait_station(ws_id);
-	PCNPRINTK("Inside resolve_waiting: %d\n", ws_id);		
+	//PCNPRINTK("Inside resolve_waiting: %d\n", ws_id);		
 	if(ws) {
-		PCNPRINTK("Got the wait station\n");
+		//PCNPRINTK("Got the wait station\n");
 	}
 	if (atomic_dec_and_test(&ws->pendings_count)) {
 		complete(&ws->pendings);
@@ -508,6 +507,21 @@ void __iomem * return_iomaps(int x)
 }
 
 EXPORT_SYMBOL(return_iomaps);
+
+void pending()
+{
+	unsigned long read_ch_irq, read_usr_irq, read_usr_pend, read_ch_pend;
+	
+	read_ch_irq = read_register(xdma_ctl + ch_irq);
+	read_usr_irq = read_register(xdma_ctl + usr_irq);
+	read_ch_pend = read_register(xdma_ctl + ch_irq_pending);
+	read_usr_pend = read_register(xdma_ctl + usr_irq_pending);
+
+	//PCNPRINTK("Usr_IRQ Pending: %lx and %lx\n", read_usr_irq, read_usr_pend);
+	//PCNPRINTK("Ch IRQ Pending: %lx and %lx\n", read_ch_irq, read_ch_pend);
+}
+
+EXPORT_SYMBOL(pending);
 
 int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g)
 {
