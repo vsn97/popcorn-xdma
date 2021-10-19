@@ -23,6 +23,7 @@
 #include <linux/sched/debug.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
+#include <linux/timekeeping.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -41,6 +42,8 @@
 #include "fh_action.h"
 
 #include "trace_events.h"
+
+u64 start_time, end_time, res_time; 
 
 /* PKEY RADIX TREE */
 RADIX_TREE(pkey_rd_tree, GFP_ATOMIC);
@@ -958,7 +961,7 @@ static void __xdma_invalidate_page(struct task_struct *tsk, unsigned long addr, 
 	int ret = 0;
 	struct fault_handle *fh;
 
-	PCNPRINTK("Inside the __xdma_invalidate_page func\n");
+	//PCNPRINTK("Inside the __xdma_invalidate_page func\n");
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
@@ -981,7 +984,7 @@ static void __xdma_invalidate_page(struct task_struct *tsk, unsigned long addr, 
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
-	PCNPRINTK("Done invalidating\n");
+	//PCNPRINTK("Done invalidating\n");
 
 	__finish_invalidation(fh);
 	pte_unmap_unlock(pte, ptl);
@@ -995,7 +998,7 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 {
 	page_invalidate_response_t *res = (page_invalidate_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
-
+	
 	ws->private = res;
 
 	if (atomic_dec_and_test(&ws->pendings_count)) {
@@ -1097,7 +1100,7 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	ws->private = res;
 
 	if(TRANSFER_PAGE_WITH_XDMA) {
-		PCNPRINTK("PKEY Received: %lx\n", res->pkey);
+		//PCNPRINTK("PKEY Received: %lx\n", res->pkey);
 		update_pkey(res->pkey, res->addr);
 	}
 
@@ -1181,6 +1184,7 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			PCNPRINTK("DONT KNOW WHICH FAULT: %d and %x\n", fault_flags, fault_flags);
 		}
 		*/
+		//start_time = ktime_get_ns();
 		pkey_res = radix_tree_lookup(&pkey_rd_tree, addr);
 		if(pkey_res != NULL) {
 			pkey = *pkey_res;
@@ -1189,9 +1193,15 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			pkey = 0;
 			//PCNPRINTK("Didn't find the PKEY\n");
 		}
+		//end_time = ktime_get_ns();
 
+		//PCNPRINTK("Time taken for radix_tree_lookup in __fetch_page_from_origin: %ld\n", end_time - start_time);
+		//start_time = ktime_get_ns();
 		prot_proc_handle_localfault((unsigned long)vmf, addr, xh->dma_addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	    tsk->pid, tsk->origin_pid, tsk->origin_nid, fault_flags, ws->id, 1);
+	    //end_time = ktime_get_ns();
+	    //PCNPRINTK("Time taken for handling_localfault in __fetch_page_from_origin: %ld\n", end_time - start_time);
+
 	} else {
 		__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
 		addr, fault_flags, ws->id, &rh, &xh);
@@ -1641,6 +1651,7 @@ again:
 		goto out;
 	}
 	mm = get_task_mm(tsk);
+	PCNPRINTK("Inside this function process_remote_page_request()");
 
 	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c %lx from [%d/%d]\n",
 			req->remote_pid, req->addr,
@@ -1795,9 +1806,12 @@ again:
 		spin_unlock(ptl);
 	}
 	pte_unmap(pte);
-
+	//start_time = ktime_get_ns();
 	/* Storing pkey */
 	update_pkey(pkey, addr);
+	//end_time = ktime_get_ns();
+
+	//PCNPRINTK("Time taken to update_pkey: %ld\n", end_time - start_time);
 
 	if(!grant) {
 		flush_cache_page(vma, addr, page_to_pfn(page));
@@ -2516,9 +2530,11 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 	}
 
 	xh = pcn_kmsg_pin_xdma_buffer(NULL, PAGE_SIZE);
+	//start_time = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, xh->dma_addr, instruction_pointer(current_pt_regs()), pkey, 
 		tsk->pid, rpid, tsk->origin_nid, vmf->flags, ws->id, 0);
-	
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to handle_localfault in __xdma_handle_lcfault_at_origin: %ld\n", end_time - start_time);
 	resp = wait_at_station(ws);
 	//PCNPRINTK("Wait is over\n");
 	//pending();
@@ -2629,7 +2645,6 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		} else {
 			ret = __handle_localfault_at_origin(vmf);
 		}
-		
 		goto out;
 	}
 
@@ -2676,6 +2691,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	ret = 0;
 
 out:
+	//PCNPRINTK("Returned: %d\n", ret);
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
