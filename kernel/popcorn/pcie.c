@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/timekeeping.h>
 
 #include <popcorn/stat.h>
 #include <popcorn/debug.h>
@@ -14,6 +15,9 @@
 
 void __iomem *xdma_axi;
 void __iomem *xdma_ctl;
+
+
+u64 sstart_time, eend_time, rres_time; 
 
 enum {
 	AXI = 0,
@@ -221,7 +225,7 @@ void user_interrupts_disable(int x)
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_disable\n");
 	}
-
+	//PCNPRINTK("After disable: %lx and %lx\n", (unsigned long)read_register(xdma_ctl + usr_irq), (unsigned long)read_register(xdma_ctl + ch_irq));
 }
 
 EXPORT_SYMBOL(user_interrupts_disable);
@@ -256,7 +260,7 @@ void user_interrupts_enable(int x)
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_enable\n");
 	}
-
+	//PCNPRINTK("After enable: %lx and %lx\n", (unsigned long)read_register(xdma_ctl + usr_irq), (unsigned long)read_register(xdma_ctl + ch_irq));
 }
 
 EXPORT_SYMBOL(user_interrupts_enable);
@@ -416,15 +420,18 @@ void prot_proc_handle_rpr(int x)
 	//PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
 		//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	//PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
+	//sstart_time = ktime_get_ns();
 	ws_id = (int)ioread32((u32 *)(xdma_axi + wr_wsid));
 	rpid = (pid_t)ioread32((u32 *)(xdma_axi + wr_rpid));
 	opid = (pid_t)ioread32((u32 *)(xdma_axi + wr_opid));
 	nid = (int)ioread32((u32 *)(xdma_axi + wr_nid));
 	vaddr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_vaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)));
-	iaddr = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_iaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)));
+	iaddr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_iaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)));
 	dma_addr = ioread32((u32 *)(xdma_axi + wr_daddr_lsb));
-	fault_flags = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
-	pkey = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
+	fault_flags = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
+	pkey = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
+	//eend_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to read all the regs in prot_proc_handle_rpr: %ld\n", eend_time - sstart_time);
 
 	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
@@ -445,16 +452,18 @@ void prot_proc_handle_inval()
 	//PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
 		//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	//PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
+	//sstart_time = ktime_get_ns();
 	ws_id = (int)ioread32((u32 *)(xdma_axi + wr_wsid));
 	rpid = (pid_t)ioread32((u32 *)(xdma_axi + wr_rpid));
 	opid = (pid_t)ioread32((u32 *)(xdma_axi + wr_opid));
 	nid = (int)ioread32((u32 *)(xdma_axi + wr_nid));
 	vaddr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_vaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)));
-	iaddr = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_iaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)));
+	iaddr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_iaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)));
 	//dma_addr = ioread32((u32 *)(xdma_axi + wr_daddr_lsb));
-	fault_flags = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
-	pkey = ((unsigned long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
-
+	fault_flags = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
+	pkey = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
+	//eend_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to read all the regs in prot_proc_handle_inval: %ld\n", eend_time - sstart_time);
 	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
 	xdma_process_invalidate_req(vaddr, iaddr, fault_flags, pkey, rpid, opid, ws_id, nid);
