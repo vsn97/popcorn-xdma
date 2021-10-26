@@ -128,8 +128,8 @@
 #define proc_vaddr_lsb dsm_proc + 0x08
 #define proc_daddr_msb dsm_proc + 0x0C
 #define proc_daddr_lsb dsm_proc + 0x10
-#define proc_vmf_msb dsm_proc + 0x6C
-#define proc_vmf_lsb dsm_proc + 0x70
+#define proc_vm_result dsm_proc + 0x6C
+#define rpr_type dsm_proc + 0x70
 #define proc_fflags_msb dsm_proc + 0x14
 #define proc_fflags_lsb dsm_proc + 0x18
 #define proc_iaddr_msb dsm_proc + 0x1C
@@ -140,6 +140,7 @@
 #define proc_nid dsm_proc + 0x30
 #define proc_mynid dsm_proc + 0x34
 #define proc_ctl dsm_proc + 0x38
+#define proc_resp_type dsm_proc + 0x88
 #define proc_mask dsm_proc + 0x7C
 
 //Writeback Regs from processor to read
@@ -157,6 +158,8 @@
 #define wr_opid dsm_proc + 0x60
 #define wr_nid dsm_proc + 0x64
 #define wr_daddr_lsb dsm_proc + 0x68
+#define wr_page_resp dsm_proc + 0x80
+#define wr_vm_res dsm_proc + 0x84
 
 #define thresh 400
 
@@ -179,8 +182,10 @@ void __iomem * return_iomaps(int x);
 
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, 
 	unsigned long pkey, pid_t opid, pid_t rpid, int nid, unsigned long fflags, int ws_id, int tsk_remote);
-void prot_proc_handle_rpr(int x);
-void prot_proc_handle_inval(void);
+void * prot_proc_handle_rpr(void);
+void * prot_proc_handle_inval(void);
+void xdma_post_response(enum pcn_kmsg_type type, int result, int from_nid, unsigned long vaddr, pid_t rpid, pid_t opid, 
+	int ws_id, unsigned long pkey);
 
 unsigned long current_pkey(void);
 void resolve_waiting(int ws_id);

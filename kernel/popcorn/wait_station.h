@@ -6,6 +6,8 @@
 
 struct wait_station {
 	int id;
+	int res;
+	int resp_type;
 	pid_t pid;
 	volatile void *private;
 	struct completion pendings;

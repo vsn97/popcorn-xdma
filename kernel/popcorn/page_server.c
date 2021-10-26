@@ -1,4 +1,4 @@
-/**
+/*
  * @file page_server.c
  *
  * Popcorn Linux page server implementation
@@ -23,6 +23,7 @@
 #include <linux/sched/debug.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
+#include <linux/timekeeping.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -41,6 +42,8 @@
 #include "fh_action.h"
 
 #include "trace_events.h"
+
+u64 start_time, end_time, res_time; 
 
 /* PKEY RADIX TREE */
 RADIX_TREE(pkey_rd_tree, GFP_ATOMIC);
@@ -958,7 +961,7 @@ static void __xdma_invalidate_page(struct task_struct *tsk, unsigned long addr, 
 	int ret = 0;
 	struct fault_handle *fh;
 
-	PCNPRINTK("Inside the __xdma_invalidate_page func\n");
+	//PCNPRINTK("Inside the __xdma_invalidate_page func\n");
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
@@ -981,7 +984,7 @@ static void __xdma_invalidate_page(struct task_struct *tsk, unsigned long addr, 
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
-	PCNPRINTK("Done invalidating\n");
+	//PCNPRINTK("Done invalidating\n");
 
 	__finish_invalidation(fh);
 	pte_unmap_unlock(pte, ptl);
@@ -995,7 +998,7 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 {
 	page_invalidate_response_t *res = (page_invalidate_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
-
+	
 	ws->private = res;
 
 	if (atomic_dec_and_test(&ws->pendings_count)) {
@@ -1097,7 +1100,7 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	ws->private = res;
 
 	if(TRANSFER_PAGE_WITH_XDMA) {
-		PCNPRINTK("PKEY Received: %lx\n", res->pkey);
+		//PCNPRINTK("PKEY Received: %lx\n", res->pkey);
 		update_pkey(res->pkey, res->addr);
 	}
 
@@ -1181,6 +1184,7 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			PCNPRINTK("DONT KNOW WHICH FAULT: %d and %x\n", fault_flags, fault_flags);
 		}
 		*/
+		//start_time = ktime_get_ns();
 		pkey_res = radix_tree_lookup(&pkey_rd_tree, addr);
 		if(pkey_res != NULL) {
 			pkey = *pkey_res;
@@ -1189,9 +1193,15 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			pkey = 0;
 			//PCNPRINTK("Didn't find the PKEY\n");
 		}
+		//end_time = ktime_get_ns();
 
+		//PCNPRINTK("Time taken for radix_tree_lookup in __fetch_page_from_origin: %ld\n", end_time - start_time);
+		//start_time = ktime_get_ns();
 		prot_proc_handle_localfault((unsigned long)vmf, addr, xh->dma_addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	    tsk->pid, tsk->origin_pid, tsk->origin_nid, fault_flags, ws->id, 1);
+	    //end_time = ktime_get_ns();
+	    //PCNPRINTK("Time taken for handling_localfault in __fetch_page_from_origin: %ld\n", end_time - start_time);
+
 	} else {
 		__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
 		addr, fault_flags, ws->id, &rh, &xh);
@@ -1199,6 +1209,8 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 
 	//PCNPRINTK("Starting to wait\n");
 	rp = wait_at_station(ws);
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to receive a page: %d\n", end_time - start_time);
 	if (rp->result == 0) {
 		//pending();
 		void *paddr = kmap(page);
@@ -1364,9 +1376,9 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
 		update_mmu_cache(vma, addr, pte);
 	}
-#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
-	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
-#endif
+//#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
+//	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
+//#endif
 }
 
 static void __make_pte_valid(struct mm_struct *mm,
@@ -1641,6 +1653,7 @@ again:
 		goto out;
 	}
 	mm = get_task_mm(tsk);
+	//PCNPRINTK("Inside this function process_remote_page_request()");
 
 	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c %lx from [%d/%d]\n",
 			req->remote_pid, req->addr,
@@ -1795,9 +1808,12 @@ again:
 		spin_unlock(ptl);
 	}
 	pte_unmap(pte);
-
+	//start_time = ktime_get_ns();
 	/* Storing pkey */
 	update_pkey(pkey, addr);
+	//end_time = ktime_get_ns();
+
+	//PCNPRINTK("Time taken to update_pkey: %ld\n", end_time - start_time);
 
 	if(!grant) {
 		flush_cache_page(vma, addr, page_to_pfn(page));
@@ -1890,17 +1906,20 @@ out:
 
 /* Protocol Processor Remote Page Request Handler */
 
-void xdma_process_remote_page_req(unsigned long vaddr, unsigned long iaddr,unsigned long dma_addr,unsigned long fault_flags,unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x)
+static void process_xdma_remote_page_request(struct work_struct *work)
 {
+	remote_page_request_t *req = prot_proc_handle_rpr();
 	remote_page_response_t *res;
-	remote_page_request_t *req;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	int res_size;
 	enum pcn_kmsg_type res_type;
 	int down_read_retry = 0;
-	//PCNPRINTK("Inside the page_server prot_proc rpr handler: %lx and %lx and %lx and %lx and %lx and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id);
+	int from_nid = req->from_nid;
+	int result;
+
+	//PCNPRINTK("Inside the page_server prot_proc rpr handler: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d and %d\n", req->addr, req->instr_addr, req->rdma_addr, req->fault_flags, req->pkey, req->remote_pid, req->origin_pid, req->origin_ws, from_nid, req->type);
 	/*
 	if(fault_for_write(fault_flags)) {
 			PCNPRINTK("WRITE FAULT: %d and %x\n", fault_flags, fault_flags);
@@ -1910,14 +1929,13 @@ void xdma_process_remote_page_req(unsigned long vaddr, unsigned long iaddr,unsig
 			PCNPRINTK("DONT KNOW WHICH FAULT: %d and %x\n", fault_flags, fault_flags);
 	}
 	*/
-	res = pcn_kmsg_get(sizeof(remote_page_response_short_t));
 	
 again:
 	//PCNPRINTK("Inside again\n");
-	tsk = __get_task_struct(rpid);
+	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) {
-		res->result = VM_FAULT_SIGBUS;
-		PGPRINTK("  [%d] not found\n", rpid);
+		result = VM_FAULT_SIGBUS;
+		PGPRINTK("  [%d] not found\n", req->remote_pid);
 		//PCNPRINTK("  [%d] not found\n", rpid);
 		goto out;
 	}
@@ -1925,20 +1943,20 @@ again:
 	mm = get_task_mm(tsk);
 
 	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c %lx from [%d]\n",
-			rpid, vaddr,
-			fault_for_write(fault_flags) ? 'W' : 'R',
-			iaddr, opid);
+			req->remote_pid, req->addr,
+			fault_for_write(req->fault_flags) ? 'W' : 'R',
+			req->instr_addr, req->origin_pid);
 
 	while (!down_read_trylock(&mm->mmap_sem)) {
 		if (!tsk->at_remote && down_read_retry++ > 4) {
-			res->result = VM_FAULT_RETRY;
+			result = VM_FAULT_RETRY;
 			goto out_up;
 		}
 		schedule();
 	}
-	vma = find_vma(mm, vaddr);
-	if (!vma || vma->vm_start > vaddr) {
-		res->result = VM_FAULT_SIGBUS;
+	vma = find_vma(mm, req->addr);
+	if (!vma || vma->vm_start > req->addr) {
+		result = VM_FAULT_SIGBUS;
 		goto out_up;
 	}
 
@@ -1948,83 +1966,77 @@ again:
 
 	if (tsk->at_remote) {
 		//PCNPRINTK("Calling the __xdma_handle_rmfault_at_remote function :%d\n", tsk->at_remote);
-		res->result = __xdma_handle_rmfault_at_remote(tsk, mm, vma, vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, from_nid, res, x);
+		result = __xdma_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->rdma_addr, req->fault_flags, req->pkey, req->remote_pid, req->origin_pid, req->origin_ws, from_nid, res, req->type);
 	} else {
 		//PCNPRINTK("Calling the xdma_rmfault_at_origin: %d", tsk->at_remote);
-		res->result = __xdma_handle_rmfault_at_origin(tsk, mm, vma, vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, from_nid, res, x);
+		result = __xdma_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->rdma_addr, req->fault_flags, req->pkey, req->remote_pid, req->origin_pid, req->origin_ws, from_nid, res, req->type);
 	}
 
 out_up:
 	//PCNPRINTK("Inside out_up: %x\n", res->result);
-	if (res->result != VM_FAULT_RETRY) {
+	if (result != VM_FAULT_RETRY) {
 		up_read(&mm->mmap_sem);
 	}
 	mmput(mm);
 	put_task_struct(tsk);
 
-	if (res->result == VM_FAULT_LOCKED) {
+	if (result == VM_FAULT_LOCKED) {
 		goto again;
 	}
 
 out:
 	res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
-	res_size = sizeof(remote_page_response_short_t);
-	res->addr = vaddr;
-	res->remote_pid = rpid;
-	res->pkey = pkey;
-	res->origin_pid = opid;
-	res->origin_ws = ws_id;
-
-	PGPRINTK("  [%d] ->[%d] %x\n", rpid,
-			opid, res->result);
+	
+	PGPRINTK("  [%d] ->[%d] %x\n", req->remote_pid,
+			req->origin_pid, result);
 	//PCNPRINTK("Posting page_req response: %x\n", res->result);
-	trace_pgfault(from_nid, rpid,
-			fault_for_write(fault_flags) ? 'W' : 'R',
-			iaddr, vaddr, res->result);
+	trace_pgfault(from_nid, req->remote_pid,
+			fault_for_write(req->fault_flags) ? 'W' : 'R',
+			req->instr_addr, req->addr, result);
 
-	pcn_kmsg_post(res_type, from_nid, res, res_size);
+	//pcn_kmsg_post(res_type, from_nid, res, res_size);
+	//PCNPRINTK("Posting response\n");
+	xdma_post_response(res_type, result, from_nid, req->addr, req->origin_pid, req->remote_pid, req->origin_ws, req->pkey);
+	pcn_kmsg_put(req);
 
 }
 
-EXPORT_SYMBOL(xdma_process_remote_page_req);
+//EXPORT_SYMBOL(xdma_process_remote_page_req);
 
 /* Protocol Processor Invalidate Page Request Handler */
 
-void xdma_process_invalidate_req(unsigned long addr, unsigned long iaddr, unsigned long fault_flags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid)
+static void process_xdma_invalidate_request(struct work_struct *work)
 {
+	page_invalidate_request_t *req = prot_proc_handle_inval();
 	page_invalidate_response_t *res;
 	struct task_struct *tsk;
+	int from_nid = req->from_nid;
 
-	res = pcn_kmsg_get(sizeof(*res));
-	res->origin_pid = opid;
-	res->origin_ws = ws_id;
-	res->remote_pid = rpid;
-	res->pkey = pkey;
-	//PCNPRINTK("Inside the xdma_process_invalidate_req func\n");
+	//PCNPRINTK("Inside the xdma_process_invalidate_req func: %d and %d and %lx and %lx and %d and %d\n", req->remote_pid, req->origin_pid, req->addr, req->pkey, req->origin_ws, from_nid);
 
-	tsk = __get_task_struct(rpid);
+	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) {
 		PGPRINTK("%s: no such process %d %d %lx\n", __func__,
-				opid, rpid, addr);
+				req->origin_pid, req->remote_pid, req->addr);
 		pcn_kmsg_put(res);
 	}
 
 	//PCNPRINTK("Found tsk to inval\n");
-	update_pkey(pkey, addr);
+	update_pkey(req->pkey, req->addr);
 
-	__xdma_invalidate_page(tsk, addr, opid, rpid, from_nid);
+	__xdma_invalidate_page(tsk, req->addr, req->origin_pid, req->remote_pid, from_nid);
 
-	PGPRINTK(">>[%d] ->[%d/%d]\n", rpid, opid,
+	PGPRINTK(">>[%d] ->[%d/%d]\n", req->remote_pid, req->origin_pid,
 			from_nid);
 
-	//PCNPRINTK("Posting inval response\n");
-	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
-			from_nid, res, sizeof(*res));
+	//PCNPRINTK("Posting invalidate response\n");
+	xdma_post_response(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE, 0, from_nid, req->addr, req->origin_pid, req->remote_pid, req->origin_ws, req->pkey);
 
 	put_task_struct(tsk);
+	pcn_kmsg_put(req);
 }
 
-EXPORT_SYMBOL(xdma_process_invalidate_req);
+//EXPORT_SYMBOL(xdma_process_invalidate_req);
 
 /*
 void insert_pkey(unsigned long pkey, unsigned long addr)
@@ -2404,6 +2416,166 @@ out_wakeup:
 	return 0;
 }
 
+/* XDMA Localfault at Remote Handler */
+
+static int __xdma_handle_lcfault_at_remote(struct vm_fault *vmf)
+{
+	spinlock_t *ptl;
+	struct page *page;
+	bool populated = false;
+	struct mem_cgroup *memcg;
+	int ret = 0;
+	struct wait_station *ws, *res_ws;
+	struct pcn_kmsg_xdma_handle *xh;
+
+	struct fault_handle *fh;
+	bool leader;
+	unsigned long addr = vmf->address & PAGE_MASK;
+	bool present;
+	unsigned long pkey = 0;
+	unsigned long *pkey_res;
+	struct task_struct *tsk = current;
+	//PCNPRINTK("Inside the __xdma_handle_lcfault_at_remote\n");
+	if (anon_vma_prepare(vmf->vma)) {
+		BUG_ON("Cannot prepare vma for anonymous page");
+		pte_unmap(vmf->pte);
+		return VM_FAULT_SIGBUS;
+	}
+
+	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
+	spin_lock(ptl);
+
+	if (!vmf->pte) {
+		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+	}
+
+	/* setup and populate pte entry */
+	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
+		pte_unmap_unlock(vmf->pte, ptl);
+		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
+		return 0;
+	}
+	fh = __start_fault_handling(current, addr, vmf->flags, ptl, &leader);
+	if (!fh) {
+		pte_unmap(vmf->pte);
+		up_read(&vmf->vma->vm_mm->mmap_sem);
+		return VM_FAULT_RETRY;
+	}
+
+	PGPRINTK(" %c[%d] %lx %p\n", leader ? '=' : '-', current->pid, addr, fh);
+	if (!leader) {
+		pte_unmap(vmf->pte);
+		ret = fh->ret;
+		if (ret) up_read(&vmf->vma->vm_mm->mmap_sem);
+		goto out_follower;
+	}
+
+	present = pte_is_present(*vmf->pte);
+	if (!present) {
+		pte_make_valid(*vmf->pte);
+	}
+	page = vm_normal_page(vmf->vma, addr, *vmf->pte);
+	if (!present) {
+		pte_make_invalid(*vmf->pte);
+	}
+	if (pte_none(*vmf->pte) || !page) {
+		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
+		BUG_ON(!page);
+
+		if (mem_cgroup_try_charge(page, vmf->vma->vm_mm, GFP_KERNEL, &memcg, false)) {
+			BUG();
+		}
+		populated = true;
+	}
+
+	get_page(page);
+	ws = get_wait_station(tsk);
+	xh = pcn_kmsg_pin_xdma_buffer(NULL, PAGE_SIZE);
+
+	pkey_res = radix_tree_lookup(&pkey_rd_tree, addr);
+	if (pkey_res != NULL) {
+		pkey = *pkey_res;
+			//PCNPRINTK("Found the PKEY: %lx and %lx\n", pkey, addr);
+	} else {
+		pkey = 0;
+			//PCNPRINTK("Didn't find the PKEY\n");
+	}
+
+	prot_proc_handle_localfault((unsigned long)vmf, addr, xh->dma_addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
+	tsk->pid, tsk->origin_pid, tsk->origin_nid, vmf->flags, ws->id, 1);
+
+	//PCNPRINTK("Starting to wait\n");
+	wait_at_station(ws);
+
+	if(ws->res == 0) {
+		//PCNPRINTK("Page has been granted to remote\n");
+		void *paddr = kmap(page);
+		copy_to_user_page(vma, page, addr, paddr, xh->addr, PAGE_SIZE);
+		pkey = current_pkey();
+		//PCNPRINTK("Updating pkey: %lx\n", pkey);
+		update_pkey(pkey, addr);
+		kunmap(page);
+		flush_dcache_page(page);
+		__SetPageUptodate(page);
+	}
+
+	if (xh) pcn_kmsg_unpin_xdma_buffer(xh);
+
+	if (ws->res && ws->res != VM_FAULT_CONTINUE) {
+		if (ws->res != VM_FAULT_RETRY)
+			PGPRINTK("  [%d] failed 0x%x\n", current->pid, ws->res);
+		ret = ws->res;
+		pte_unmap(vmf->pte);
+		up_read(&vmf->vma->vm_mm->mmap_sem);
+		goto out_free;
+	}
+
+	if (ws->res == VM_FAULT_CONTINUE) {
+		/**
+		 * Page ownership is granted without transferring the page data
+		 * since this node already owns the up-to-dated page
+		 */
+		//PCNPRINTK("Remote node owns up-to date page\n");
+		pte_t entry;
+		BUG_ON(populated);
+		//PCNPRINTK("Page already owns up-to date page: %x\n", rp->result);
+		spin_lock(ptl);
+		entry = pte_make_valid(*vmf->pte);
+		if (fault_for_write(vmf->flags)) {
+			entry = pte_mkwrite(entry);
+			entry = pte_mkdirty(entry);
+		} else {
+			entry = pte_wrprotect(entry);
+		}
+		entry = pte_mkyoung(entry);
+
+		if (ptep_set_access_flags(vmf->vma, addr, vmf->pte, entry, 1)) {
+			update_mmu_cache(vmf->vma, addr, vmf->pte);
+		}
+	} else {
+		//PCNPRINTK("Page is granted to the node: %x\n", ws->res);
+		spin_lock(ptl);
+		if (populated) {
+			alloc_set_pte(vmf, memcg, page);
+		} else {
+			__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
+		}
+	}
+
+	SetPageDistributed(vmf->vma->vm_mm, addr);
+
+	pte_unmap_unlock(vmf->pte, ptl);
+	ret = 0;	/* The leader squashes both 0 and VM_FAULT_CONTINUE to 0 */
+
+out_free:
+	put_page(page);
+	fh->ret = ret;
+
+out_follower:
+	__finish_fault_handling(fh);
+	return ret;
+}
+
 /* XDMA Localfault at Origin Handler */
 
 static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
@@ -2505,7 +2677,7 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 	}
 
 	peers = 1;
-	ws = get_wait_station_multiple(current, peers);
+	ws = get_wait_station_multiple(tsk, peers);
 	//PCNPRINTK("Got wait stations\n");
 	if(r_nid != my_nid) {
 		rpid = rc->remote_tgids[r_nid];
@@ -2516,66 +2688,60 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 	}
 
 	xh = pcn_kmsg_pin_xdma_buffer(NULL, PAGE_SIZE);
+	//start_time = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, xh->dma_addr, instruction_pointer(current_pt_regs()), pkey, 
 		tsk->pid, rpid, tsk->origin_nid, vmf->flags, ws->id, 0);
-	
-	resp = wait_at_station(ws);
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to handle_localfault in __xdma_handle_lcfault_at_origin: %ld\n", end_time - start_time);
+	wait_at_station(ws);
+	//end_time = ktime_get_ns();
 	//PCNPRINTK("Wait is over\n");
 	//pending();
-	if(resp != NULL) {
-		//PCNPRINTK("RP is not NULL\n");
-		ret = check_msg_type(resp);
-		//PCNPRINTK("Message type : %d\n", ret);
-		if (ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT || ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE) {
-			//PCNPRINTK("its a remote page response!\n");
-			bool present;
-			present = pte_is_present(vmf->orig_pte);
-			if (!present) {
-				pte_make_valid(vmf->orig_pte);
-			}
-			page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
-			if (!present) {
-				pte_make_invalid(vmf->orig_pte);
-			}
-			BUG_ON(!page);
+	//PCNPRINTK("RP is not NULL\n");
+	ret = ws->resp_type;
+	//PCNPRINTK("Message type : %d\n", ret);
+	if (ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT || ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE) {
+		//PCNPRINTK("its a remote page response and time taken: %d!\n", end_time-start_time);
+		bool present;
+		present = pte_is_present(vmf->orig_pte);
+		if (!present) {
+			pte_make_valid(vmf->orig_pte);
+		}
+		page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
+		if (!present) {
+			pte_make_invalid(vmf->orig_pte);
+		}
+		BUG_ON(!page);
 
-			rp = (remote_page_response_t *)resp;
-			if(rp->result == 0) {
-				void *paddr = kmap(page);
-				//PCNPRINTK("Claimed remote page to origin and pkey: %x and %lx\n", rp->result, rp->pkey);
-				copy_to_user_page(vma, page, addr, paddr, xh->addr, PAGE_SIZE);
-				kunmap(page);
-				flush_dcache_page(page);
-				__SetPageUptodate(page);
-				pcn_kmsg_done(rp);
-				if(xh) pcn_kmsg_unpin_xdma_buffer(xh);
-				__put_task_remote(rc);
-				spin_lock(ptl);
-				__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
-			}
-		} else {
-			//PCNPRINTK("its a inval page response!\n");
-			in_res = (page_invalidate_response_t *)resp;
-			if(in_res->pkey) {
-				//PCNPRINTK("Pkey is there inside the inval resp: %lx\n", in_res->pkey);
-				pkey = in_res->pkey;
-			} else {
-				pkey = current_pkey();
-			}
-
-			//PCNPRINTK("Updated pkey: %lx\n", pkey);
-			update_pkey(pkey, addr);
-			put_task_remote(tsk);
+		if(ws->res == 0) {
+			void *paddr = kmap(page);
+			copy_to_user_page(vma, page, addr, paddr, xh->addr, PAGE_SIZE);
+			pkey = current_pkey();
+			//PCNPRINTK("Updated pkey: %lx and %d\n", pkey, ws->res);
+			kunmap(page);
+			flush_dcache_page(page);
+			__SetPageUptodate(page);
 			if(xh) pcn_kmsg_unpin_xdma_buffer(xh);
+			__put_task_remote(rc);
 			spin_lock(ptl);
-			vmf->orig_pte = pte_mkwrite(vmf->orig_pte);
-			vmf->orig_pte = pte_mkdirty(vmf->orig_pte);
-			vmf->orig_pte = pte_mkyoung(vmf->orig_pte);
+			__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
+		}
+		
+	} else {
+		//PCNPRINTK("its a inval page response and time taken:%d!\n", end_time-start_time);
+		pkey = current_pkey();
+		//PCNPRINTK("Updated pkey: %lx\n", pkey);
+		update_pkey(pkey, addr);
+		put_task_remote(tsk);
+		if(xh) pcn_kmsg_unpin_xdma_buffer(xh);
+		spin_lock(ptl);
+		vmf->orig_pte = pte_mkwrite(vmf->orig_pte);
+		vmf->orig_pte = pte_mkdirty(vmf->orig_pte);
+		vmf->orig_pte = pte_mkyoung(vmf->orig_pte);
 
-			if (ptep_set_access_flags(vmf->vma, addr, vmf->pte, vmf->orig_pte, 1)) {
-				update_mmu_cache(vmf->vma, addr, vmf->pte);
-				//PCNPRINTK("Updated mmu_cache\n");
-			}
+		if (ptep_set_access_flags(vmf->vma, addr, vmf->pte, vmf->orig_pte, 1)) {
+			update_mmu_cache(vmf->vma, addr, vmf->pte);
+			//PCNPRINTK("Updated mmu_cache\n");
 		}
 	}
 
@@ -2623,13 +2789,12 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	 */
 	if (!current->at_remote) {
 		//PCNPRINTK("Fault @ ORIGIN\n");
-		if(TRANSFER_PAGE_WITH_XDMA) {
+		if (TRANSFER_PAGE_WITH_XDMA) {
 			//PCNPRINTK("Calling the __xdma_handle_lcfault_at_origin()\n");
 			ret = __xdma_handle_lcfault_at_origin(vmf);
 		} else {
 			ret = __handle_localfault_at_origin(vmf);
 		}
-		
 		goto out;
 	}
 
@@ -2659,7 +2824,11 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	if (!pte_is_present(vmf->orig_pte)) {
 		/* Remote page fault */
 		//PCNPRINTK("Fault @ REMOTE\n");
-		ret = __handle_localfault_at_remote(vmf);
+		if (TRANSFER_PAGE_WITH_XDMA) {
+			ret = __xdma_handle_lcfault_at_remote(vmf);
+		} else {
+			ret = __handle_localfault_at_remote(vmf);
+		}
 		goto out;
 	}
 
@@ -2667,7 +2836,11 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 			fault_for_write(vmf->flags) && !pte_write(vmf->orig_pte)) {
 		/* wr-protected for keeping page consistency */
 		//PCNPRINTK("Fault @ REMOTE\n");
-		ret = __handle_localfault_at_remote(vmf);
+		if (TRANSFER_PAGE_WITH_XDMA) {
+			ret = __xdma_handle_lcfault_at_remote(vmf);
+		} else {
+			ret = __handle_localfault_at_remote(vmf);
+		}
 		goto out;
 	}
 
@@ -2676,6 +2849,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	ret = 0;
 
 out:
+	//PCNPRINTK("Returned: %d\n", ret);
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
@@ -2688,19 +2862,25 @@ out:
  * Routing popcorn messages to workers
  */
 DEFINE_KMSG_WQ_HANDLER(remote_page_request);
+DEFINE_KMSG_WQ_HANDLER(xdma_remote_page_request);
 DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
+DEFINE_KMSG_WQ_HANDLER(xdma_invalidate_request);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
 {
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, xdma_remote_page_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT, remote_page_response);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, xdma_invalidate_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
 	REGISTER_KMSG_WQ_HANDLER(

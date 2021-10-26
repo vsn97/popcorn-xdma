@@ -63,6 +63,11 @@ enum pcn_kmsg_type {
 
 	/* Schedule server */
 	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
+
+	/* XDMA Functions */
+	PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST,
+	PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST,
+	
 	PCN_KMSG_TYPE_MAX
 };
 
@@ -143,6 +148,11 @@ void pcn_kmsg_put(void *msg);
  * the request by calling this function
  */
 void pcn_kmsg_process(struct pcn_kmsg_message *msg);
+
+/**
+ * Process the received messag @msg for XDMA. 
+ */
+void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg);
 
 /**
  * Return received message @msg after handling to recyle it. @msg becomes

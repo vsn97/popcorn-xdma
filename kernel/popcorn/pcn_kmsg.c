@@ -72,6 +72,21 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_process);
 
+void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg)
+{
+	pcn_kmsg_cbftn ftn;
+
+	ftn = pcn_kmsg_cbftns[type];
+																																																
+	if (ftn != NULL) {
+		ftn(msg);
+	} else {
+		printk(KERN_ERR"No callback registered for %d\n", type);
+	}
+}
+EXPORT_SYMBOL(pcn_kmsg_xdma_process);
+
+
 int check_msg_type(struct pcn_kmsg_message *msg)
 {
 	if(msg != NULL){
@@ -81,7 +96,6 @@ int check_msg_type(struct pcn_kmsg_message *msg)
 	}
 	
 }
-
 EXPORT_SYMBOL(check_msg_type);
 
 static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)

@@ -21,11 +21,13 @@
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/time.h>
+#include <linux/timekeeping.h>
 
 #include <popcorn/stat.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/page_server.h>
 #include <popcorn/pcie.h>
+
 #include "common.h"
 #include "ring_buffer.h"
 
@@ -34,6 +36,9 @@
 #define MAX_SEND_DEPTH	(MAX_RECV_DEPTH)
 #define XDMA_SLOT_SIZE PAGE_SIZE * 2
 #define XDMA_SLOTS 320
+
+
+u64 start_time, end_time, res_time, end_time1, end_time2; 
 
 static unsigned int use_rb_thr = PAGE_SIZE / 2;
 
@@ -62,6 +67,12 @@ static int nid;
 static ktime_t start_s, start_w, end_s, end_w;
 s64 actual_time_w, actual_time_s; 
 
+void tasklet_func(unsigned long arg);
+//void tasklet_page_func(unsigned long arg);
+
+DECLARE_TASKLET(tasklet, tasklet_func, 1);
+//DECLARE_TASKLET(tasklet_page, tasklet_page_func, 1);
+
 static int KV[XDMA_SLOTS];
 
 struct work_hdr {
@@ -84,6 +95,7 @@ enum {
 	PGWRITE = 1,
 	VMF_CONTINUE = 2,
 	PGINVAL = 3,
+	PGRESP = 4,
 };
 
 enum {
@@ -94,7 +106,7 @@ enum {
 	INVAL = 3,
 	FAULT = 4,
 	MKWRITE = 5,
-	FETCH = 6,
+	RESP = 6,
 	RPR_WR = 7,
 	VMFC = 8,
 };
@@ -214,7 +226,7 @@ static void __update_recv_index(queue_tr *q, int i)
 	int ret;
 	//void *addr;
 
-	if(i == q->nr_entries)	{
+	if (i == q->nr_entries)	{
 		i = 0;
 		q->tail = -1;
 	}
@@ -527,6 +539,7 @@ static int deq_send(queue_t *q)
 	struct send_work *work;
 	struct pcn_kmsg_message *msg;
 	int ret, i;
+	
 	do {
 
 		ret = down_interruptible(&q_empty);
@@ -535,6 +548,7 @@ static int deq_send(queue_t *q)
 		}
 	} while(ret);
 
+	//start_time = ktime_get_ns();
 	spin_lock(&send_queue_lock);
 	work = q->work_list[q->head];
 	q->head = (q->head + 1) % q->nr_entries;
@@ -552,7 +566,8 @@ static int deq_send(queue_t *q)
 	ret = xdma_transfer(TO_DEVICE, KMSG);
 
 	if(ret) goto out;
-
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to deq_send: %ld\n", end_time - start_time);
 	return 0;
 
 out:
@@ -614,7 +629,7 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 	int ret;
 
 	//PCNPRINTK("Inside xdma write function\n");
-
+	//start_time = ktime_get_ns();
 	dma_addr = dma_map_single(&pci_dev->dev,addr, size, DMA_TO_DEVICE);
 	ret = dma_mapping_error(&pci_dev->dev,dma_addr);
 
@@ -626,19 +641,17 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 	//PCNPRINTK("Done mapping Page: %llx\n", dma_addr);
 
 	BUG_ON(ret);
-
+	//end_time1 = ktime_get_ns();
 	xw = __get_xdma_work(dma_addr, addr, size, raddr);
 	BUG_ON(!xw);
 	//PCNPRINTK("Got the xdma work\n");
 	//xw->done = &done;
 	//PCNPRINTK("Page to be sent: %llx \n", xw->dma_addr);
 	//curr_xw = xw;
+	//end_time2 = ktime_get_ns();
 	ret = config_descriptors_bypass(xw->dma_addr, size, TO_DEVICE, PAGE);
+	//res_time = ktime_get_ns();
 	ret = xdma_transfer(TO_DEVICE, PAGE);
-	if(ret) {
-		PCNPRINTK("Cannot do XDMA KMSG write\n");
-		goto out;
-	}
 
 	/* if(!try_wait_for_completion(&done)) {
 		wait_for_completion(&done);
@@ -648,11 +661,17 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 out:
 	dma_unmap_single(&pci_dev->dev,dma_addr, size, DMA_TO_DEVICE);
 	__put_xdma_work(xw);
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to __get_xdma_work: %ld\n", end_time2 - end_time1);
+	//PCNPRINTK("Time taken to config_descriptors_bypass: %ld\n", res_time - end_time2);
+	//PCNPRINTK("Time taken to xdma_transfer: %ld\n", end_time - res_time);
+	//PCNPRINTK("Time taken to dma_map_single: %ld\n", end_time1 - start_time);
 	return ret;
 }
 
 int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
+	//start_time = ktime_get_ns();
 	struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
 	struct send_work *work = rbah->work;
 
@@ -663,7 +682,8 @@ int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 	//}
 	//PCNPRINTK("__POST FRAME END __\n");
 	__enq_send(work);
-
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to xdma_kmsg_post: %ld\n", end_time - start_time);
 	return 0;
 }
 
@@ -827,7 +847,7 @@ static int __check_page_index(int i)
 			return 0;
 		}
 	} else if(KV[i]) {
-		PCNPRINTK("Buffer not unpinned: %d\n\r", KV[i]);
+		PCNPRINTK("Buffer not unpinned: %d and %d\n\r", KV[i], i);
 		return -1;
 	} else {
 		return i;
@@ -837,7 +857,8 @@ static int __check_page_index(int i)
 struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 {
 	int ret;
-	struct pcn_kmsg_xdma_handle *xh = kmalloc(sizeof(*xh), GFP_KERNEL);
+	//start_time = ktime_get_ns();
+	struct pcn_kmsg_xdma_handle *xh = kmalloc(sizeof(*xh), GFP_ATOMIC);
 	//PCNPRINTK("Inside the Pin Buffer function\n");
 	spin_lock(&__xdma_slots_lock);
 	ret = __check_page_index(page_ix);
@@ -854,6 +875,8 @@ struct pcn_kmsg_xdma_handle *xdma_kmsg_pin_buffer(void *msg, size_t size)
 	page_ix += 1;
 	//PCNPRINTK("Pin Index and DMA Address: %d and %llx\n", page_ix, xh->dma_addr);
 	spin_unlock(&__xdma_slots_lock);
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to pin xdma_buff: %ld\n", end_time - start_time);
 	return xh;
 }
 
@@ -938,7 +961,7 @@ static int __process_received(struct recv_work *rws)
 	//void *addr;
 	bool ret;
 	int i;
-
+	//start_time = ktime_get_ns();
 	msg = rws->addr;
 	if(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX || 
 	 msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE){
@@ -947,12 +970,6 @@ static int __process_received(struct recv_work *rws)
 	}
 	
 	work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	//PCNPRINTK("Message Received: %d and %d and %lx and %llx\n", msg->header.from_nid, msg->header.type, msg->header.size, (unsigned long)rws->addr);
-	//PCNPRINTK("__RECV FRAME __\n");
-	//for(i = 0; i < 25; i++){
-		//PCNPRINTK("%lx\n", read_register((u32 *)msg+i));
-	//}
-	//PCNPRINTK("__RECV FRAME END __\n");
 
 	INIT_WORK((struct work_struct *)work, process_msg);
 	work->addr = rws->addr;
@@ -963,8 +980,45 @@ static int __process_received(struct recv_work *rws)
 		PCNPRINTK("Work already exists\n");
 		return 1;
 	}
-
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to queue a recvd message: %ld\n", end_time - start_time);
 	return 0;
+}
+
+void tasklet_func(unsigned long arg)
+{
+	struct pcn_kmsg_message *msg;
+	int recv_i;
+	recv_i = recv_queue->size;
+	//ret = __process_received(recv_queue->work_list[recv_i]);
+	msg = recv_queue->work_list[recv_i]->addr;
+
+	recv_queue->size += 1;
+	if(recv_queue->size == recv_queue->nr_entries) {
+		recv_queue->size = 0;
+	}
+	pcn_kmsg_process(msg);
+}
+
+void tasklet_page_func(unsigned long arg)
+{
+	int *pgtype, *ws_id;
+	pgtype = (int *)(xdma_x + rpr_type);
+
+	//PCNPRINTK("Inside the tasklet_page_func: %d\n", *pgtype);
+	if (*pgtype == PGREAD) {
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+	} else if (*pgtype == PGWRITE) {
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+	} else if (*pgtype == VMF_CONTINUE) {
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+	} else if (*pgtype == PGINVAL) {
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
+	} else {
+		ws_id = (int *)(xdma_x + wr_wsid);
+		resolve_waiting(*ws_id);
+	}
+
 }
 
 static void prot_handle_rpr(struct work_struct *work)
@@ -973,7 +1027,7 @@ static void prot_handle_rpr(struct work_struct *work)
 	struct prot_work *pw = (struct prot_work *)work;
 	x = pw->x;
 	//PCNPRINTK("Inside the prot_proc_handle func Work: %d\n", x);
-	prot_proc_handle_rpr(x);
+	//prot_proc_handle_rpr(x);
 	kfree((void *)work);
 }
 
@@ -1139,12 +1193,14 @@ out_unmap:
 static irqreturn_t xdma_isr(int irq, void *dev_id)
 {
 	unsigned long read_ch_irq, read_usr_irq, pkey, addr;
-	int ret, index, recv_i, ws_id;
+	int ret, index, recv_i;
+	int *ws_id;
+	struct pcn_kmsg_message *msg; 
 	
 	read_ch_irq = read_register(xdma_c + ch_irq);
 	read_usr_irq = read_register(xdma_c + usr_irq);
 	
-	if(read_usr_irq & 0x02) {
+	if (read_usr_irq & 0x02) {
 		//PCNPRINTK("Received Page in FIFO: %x\n", read_usr_irq);
 		user_interrupts_disable(PAGE);
 		ret = xdma_transfer(FROM_DEVICE, PAGE);
@@ -1152,41 +1208,40 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		//PCNPRINTK("Transfer done\n");
 		//return IRQ_HANDLED;
 
-	} else if(read_ch_irq & 0x01) {
+	} else if (read_ch_irq & 0x01) {
 		channel_interrupts_disable(TO_DEVICE, KMSG);
 		__process_sent(curr_sw);
 		channel_interrupts_enable(TO_DEVICE, KMSG);
 		//PCNPRINTK("Sent message: %x\n", read_ch_irq);		
 		//return IRQ_HANDLED;
 
-	} else if(read_ch_irq & 0x04) {
-
+	} else if (read_ch_irq & 0x04) {
+		//start_time = ktime_get_ns();
 		channel_interrupts_disable(FROM_DEVICE, KMSG);
-		recv_i = recv_queue->size;
-		ret = __process_received(recv_queue->work_list[recv_i]);
-		recv_queue->size += 1;
-		if(recv_queue->size == recv_queue->nr_entries) {
-			recv_queue->size = 0;
-		}
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to channel_interrupts_disable: %ld\n", end_time - start_time);
+		//PCNPRINTK("Recv message\n");
+		tasklet_schedule(&tasklet);
+		//start_time = ktime_get_ns();
 		channel_interrupts_enable(FROM_DEVICE, KMSG);
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to channel_interrupts_enable: %ld\n", end_time - start_time);
+		//return IRQ_HANDLED;)
 
-		//return IRQ_HANDLED;
-		PCNPRINTK("Received message: %x\n", read_ch_irq);
-	
-	} else if(read_ch_irq & 0x02) {
+	} else if (read_ch_irq & 0x02) {
 		channel_interrupts_disable(TO_DEVICE, PAGE);
 		//__page_sent(curr_xw);
 		channel_interrupts_enable(TO_DEVICE, PAGE);
 		//PCNPRINTK("Sent page: %x\n", read_ch_irq);	
 		//return IRQ_HANDLED;
 		
-	} else if(read_ch_irq & 0x08) {
+	} else if (read_ch_irq & 0x08) {
 		channel_interrupts_disable(FROM_DEVICE, PAGE);
 		channel_interrupts_enable(FROM_DEVICE, PAGE);
 		//PCNPRINTK("Received Page: %x\n", read_ch_irq);
 		//return IRQ_HANDLED;
 		
-	} else if(read_usr_irq & 0x01) {
+	} else if (read_usr_irq & 0x01) {
 		//PCNPRINTK("Received in FIFO: %x\n", read_usr_irq);
 		user_interrupts_disable(KMSG);
 		ret = xdma_transfer(FROM_DEVICE, KMSG);
@@ -1196,21 +1251,84 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(KMSG);
 		//return IRQ_HANDLED;
 
-	} else if(read_usr_irq & 0x04) {
+	} else if (read_usr_irq & 0x04) {
+		//start_time = ktime_get_ns();
 		user_interrupts_disable(RPR_RD);
-		PCNPRINTK("RPR RD Intr: %x\n", read_usr_irq);
-		__prot_proc_recv(PGREAD);
+		//PCNPRINTK("RPR RD Intr: %x\n", read_usr_irq);
+		write_register(PGREAD, (u32 *)(xdma_x + rpr_type));
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to user_interrupts_disable: %ld\n", end_time - start_time);
+		//start_time = ktime_get_ns();
+		
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to queue a pgread: %ld\n", end_time - start_time);
+		//start_time = ktime_get_ns();
 		user_interrupts_enable(RPR_RD);
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to user_interrupts_enable: %ld\n", end_time - start_time);	
 		//return IRQ_HANDLED;
 
-	} else if(read_usr_irq & 0x08) {	       
+	} else if (read_usr_irq & 0x80) {
+		user_interrupts_disable(RESP);
+		
+		//PCNPRINTK("Resp intr\n");
+		ws_id = (int *)(xdma_x + wr_wsid);
+		resolve_waiting(*ws_id);
+		//write_register(PGRESP, (u32 *)(xdma_x + rpr_type));
+		//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+		//start_time = ktime_get_ns();
+		//PCNPRINTK("VMF Continue intr: %x\n", read_usr_irq);
+		
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to queue a vmfc: %ld\n", end_time - start_time);
+		user_interrupts_enable(RESP);
+		//return IRQ_HANDLED;
+
+	} else if (read_usr_irq & 0x08) {	       
 		user_interrupts_disable(INVAL);
-		 PCNPRINTK("Inval intr: %x\n", read_usr_irq);
-		 __prot_proc_recv(PGINVAL);
+		//write_register(PGINVAL, (u32 *)(xdma_x + rpr_type));
+		//tasklet_schedule(&tasklet_page);
+		//PCNPRINTK("Inval intr: %x\n", read_usr_irq);
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
+		//start_time = ktime_get_ns();
+		
+		 //__prot_proc_recv(PGINVAL);
+		
+		// end_time = ktime_get_ns();
+		 //PCNPRINTK("Time taken to queue a inval: %ld\n", end_time - start_time);
 		user_interrupts_enable(INVAL);
 		//return IRQ_HANDLED;
 
-	} else if(read_usr_irq & 0x10) {
+	} else if (read_usr_irq & 0x20) {
+		user_interrupts_disable(RPR_WR);
+		//PCNPRINTK("RPR Wr intr: %x\n", read_usr_irq);
+		write_register(PGWRITE, (u32 *)(xdma_x + rpr_type));
+		//tasklet_schedule(&tasklet_page);
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+		//start_time = ktime_get_ns();
+		
+
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to queue a pgwrite: %ld\n", end_time - start_time);
+		user_interrupts_enable(RPR_WR);
+		//return IRQ_HANDLED;
+
+	}  else if (read_usr_irq & 0x40) {
+		user_interrupts_disable(VMFC);
+		//PCNPRINTK("VMF Continue intr: %x\n", read_usr_irq);
+		write_register(VMF_CONTINUE, (u32 *)(xdma_x + rpr_type));
+		//tasklet_schedule(&tasklet_page);
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+		//start_time = ktime_get_ns();
+		
+		
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to queue a vmfc: %ld\n", end_time - start_time);
+		user_interrupts_enable(VMFC);
+		//return IRQ_HANDLED;
+
+	} else if (read_usr_irq & 0x10) {
 		user_interrupts_disable(FAULT);
 		printk(KERN_ERR "FAULT intr: %x\n", read_usr_irq);
 		PCNPRINTK("PKEY: %lx and %lx\n", ioread32((u32 *)(xdma_x + wr_pkey_msb)), ioread32((u32 *)(xdma_x + wr_pkey_lsb)));
@@ -1235,21 +1353,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(FETCH);
 		//return IRQ_HANDLED;
 
-	}*/ else if(read_usr_irq & 0x20) {
-		user_interrupts_disable(RPR_WR);
-		PCNPRINTK("RPR Wr intr: %x\n", read_usr_irq);
-		__prot_proc_recv(PGWRITE);
-		user_interrupts_enable(RPR_WR);
-		//return IRQ_HANDLED;
-
-	}  else if(read_usr_irq & 0x40) {
-		user_interrupts_disable(VMFC);
-		PCNPRINTK("VMF Continue intr: %x\n", read_usr_irq);
-		__prot_proc_recv(VMF_CONTINUE);
-		user_interrupts_enable(VMFC);
-		//return IRQ_HANDLED;
-
-	} else {
+	}*/ else {
 		PCNPRINTK("Other interrupts: %d and %d\n", read_ch_irq, read_usr_irq);
 		//return IRQ_HANDLED;
 	}
@@ -1346,7 +1450,9 @@ static void __exit exit_kmsg_xdma(void)
 
 	destroy_workqueue(wq);
 	//delete_pkeys();
-	
+	tasklet_kill(&tasklet);
+	//tasklet_kill(&tasklet_page);
+
 	if(tsk) {
 		wake_up_process(tsk);
 		//kthread_stop(tsk);
@@ -1359,7 +1465,10 @@ static void __exit exit_kmsg_xdma(void)
 
 static int __init init_kmsg_xdma(void)
 {
-	int i, ret;
+	int i, ret, test_nid;
+	int *test;
+	unsigned long *pkey_msb, *pkey_lsb;
+	unsigned long test_key; 
 
 	PCNPRINTK("\n ... Loading Popcorn messaging Layer over XDMA ...\n");
 
@@ -1411,7 +1520,6 @@ static int __init init_kmsg_xdma(void)
 	my_nid = 1;
 	PCNPRINTK("Node number: %d\n", my_nid);
 	write_mynid(my_nid);
-	
 	set_popcorn_node_online(my_nid, true);
 
 	if(__setup_irq_handler()) {

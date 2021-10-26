@@ -250,7 +250,10 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long fault_flags; \
 	unsigned long instr_addr; \
 	dma_addr_t rdma_addr; \
-	u32 rdma_key;
+	u32 rdma_key; \
+	unsigned long pkey; \
+	int type; \
+	int from_nid;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
@@ -267,7 +270,8 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
 #define REMOTE_PAGE_GRANT_FIELDS \
-	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
+	
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
 
@@ -298,7 +302,9 @@ DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
-	unsigned long addr;
+	unsigned long addr; \
+	unsigned long pkey; \
+	int from_nid;
 DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
