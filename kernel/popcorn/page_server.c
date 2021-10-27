@@ -2717,6 +2717,7 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 			void *paddr = kmap(page);
 			copy_to_user_page(vma, page, addr, paddr, xh->addr, PAGE_SIZE);
 			pkey = current_pkey();
+			update_pkey(pkey,addr);
 			//PCNPRINTK("Updated pkey: %lx and %d\n", pkey, ws->res);
 			kunmap(page);
 			flush_dcache_page(page);
