@@ -182,7 +182,7 @@ void __iomem * return_iomaps(int x);
 
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, 
 	unsigned long pkey, pid_t opid, pid_t rpid, int nid, unsigned long fflags, int ws_id, int tsk_remote);
-void * prot_proc_handle_rpr(void);
+void * prot_proc_handle_rpr(int x);
 void * prot_proc_handle_inval(void);
 void xdma_post_response(enum pcn_kmsg_type type, int result, int from_nid, unsigned long vaddr, pid_t rpid, pid_t opid, 
 	int ws_id, unsigned long pkey);

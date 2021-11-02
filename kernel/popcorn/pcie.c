@@ -38,6 +38,15 @@ enum {
 	VMFC = 8,
 };
 
+enum {
+
+	PGREAD = 0,
+	PGWRITE = 1,
+	VMF_CONTINUE = 2,
+	PGINVAL = 3,
+	PGRESP = 4,
+};
+
 void write_register(u32 value, void *iomem)
 {
 	iowrite32(value, iomem);
@@ -364,6 +373,21 @@ EXPORT_SYMBOL(xdma_transfer);
 
 /* Protocol Processor Functions */
 
+void resolve_waiting(int ws_id)
+{
+	struct wait_station *ws;
+	ws = wait_station(ws_id);
+	ws->res = (int)ioread32((u32 *)(xdma_axi + wr_vm_res));
+	ws->resp_type = (int)ioread32((u32 *)(xdma_axi + wr_page_resp));
+
+	//PCNPRINTK("Inside resolve_waiting: %d\n", ws_id);		
+	
+	if (atomic_dec_and_test(&ws->pendings_count)) {
+		complete(&ws->pendings);
+	}
+}
+EXPORT_SYMBOL(resolve_waiting);
+
 /* Local Fault Handler */
 
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, unsigned long pkey, 
@@ -414,15 +438,15 @@ EXPORT_SYMBOL(prot_proc_handle_localfault);
 
 /* Remote Page Request Handler */
 
-void * prot_proc_handle_rpr()
+void * prot_proc_handle_rpr(int x)
 {
 	remote_page_request_t *req = pcn_kmsg_get(sizeof(*req));
 	//unsigned long vaddr, iaddr, fault_flags, pkey;
-	//int ws_id, nid;
+	
 	//pid_t rpid, opid;
 	//dma_addr_t dma_addr;
 	//PCNPRINTK("Reading before concat 1: %lx and %lx and %lx and %lx and %lx and %lx and %lx\n", ioread32((u32 *)(xdma_axi + wr_vaddr_msb)), ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_iaddr_msb)), 
-		//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
+	//ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)), ioread32((u32 *)(xdma_axi + wr_daddr_lsb)), ioread32((u32 *)(xdma_axi + wr_fflags_msb)), ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	//PCNPRINTK("Reading before concat 2: %d and %d and %d\n", ioread32((u32 *)(xdma_axi + wr_opid)), ioread32((u32 *)(xdma_axi + wr_rpid)), ioread32((u32 *)(xdma_axi + wr_wsid)));
 	//sstart_time = ktime_get_ns();
 	req->origin_ws = (int)ioread32((u32 *)(xdma_axi + wr_wsid));
@@ -434,14 +458,17 @@ void * prot_proc_handle_rpr()
 	req->rdma_addr = ioread32((u32 *)(xdma_axi + wr_daddr_lsb));
 	req->fault_flags = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	req->pkey = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
-	req->type = (int) ioread32((u32 *)(xdma_axi + rpr_type));
+	req->type = x;
+	
+	return req;	
+
 	//eend_time = ktime_get_ns();
 	//PCNPRINTK("Time taken to read all the regs in prot_proc_handle_rpr: %ld\n", eend_time - sstart_time);
 
 	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
 	//xdma_process_remote_page_req(vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid, x);
-	return req;
+
 }
 EXPORT_SYMBOL(prot_proc_handle_rpr);
 
@@ -471,6 +498,7 @@ void * prot_proc_handle_inval()
 	//PCNPRINTK("Reading the regs: %lx and %lx and %lx and %lx and %lx and %d and %d and %d and %d\n", vaddr, iaddr, dma_addr, fault_flags, pkey, rpid, opid, ws_id, nid);
 
 	//xdma_process_invalidate_req(vaddr, iaddr, fault_flags, pkey, rpid, opid, ws_id, nid);
+	//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, req);
 	return req;
 }
 EXPORT_SYMBOL(prot_proc_handle_inval);
@@ -512,21 +540,6 @@ unsigned long current_pkey()
 	return pkey;
 }
 EXPORT_SYMBOL(current_pkey);
-
-void resolve_waiting(int ws_id)
-{
-	struct wait_station *ws;
-	ws = wait_station(ws_id);
-	ws->res = (int)ioread32((u32 *)(xdma_axi + wr_vm_res));
-	ws->resp_type = (int)ioread32((u32 *)(xdma_axi + wr_page_resp));
-
-	//PCNPRINTK("Inside resolve_waiting: %d\n", ws_id);		
-	
-	if (atomic_dec_and_test(&ws->pendings_count)) {
-		complete(&ws->pendings);
-	}
-}
-EXPORT_SYMBOL(resolve_waiting);
 
 void __iomem * return_iomaps(int x)
 {

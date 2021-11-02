@@ -314,6 +314,9 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 	unsigned long pkey;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
+#define REMOTE_PAGE_RESPONSE_TYPE_FIELDS \
+	int x;
+DEFINE_PCN_KMSG(rpr_type_t, REMOTE_PAGE_RESPONSE_TYPE_FIELDS);
 
 /**
  * Futex
