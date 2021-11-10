@@ -1036,7 +1036,10 @@ static void prot_handle_rpr(struct work_struct *work)
 	int x, ws_id;
 	struct prot_work *pw = (struct prot_work *)work;
 	x = pw->x;
-	prot_proc_handle_rpr(x);
+	struct rpr_work *rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
+	rpr->x = x;
+	pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+	//prot_proc_handle_rpr(x);
 	//PCNPRINTK("Inside the prot_proc_handle func Work: %d\n", x);
 	//prot_proc_handle_rpr(x);
 	kfree((void *)work);
@@ -1046,7 +1049,8 @@ static void prot_handle_inval(struct work_struct *work)
 {
 	//struct prot_work *pw = (struct prot_work *)work;
 	//PCNPRINTK("Inval Intr\n");
-	prot_proc_handle_inval();
+	pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
+	//prot_proc_handle_inval();
 	kfree((void *)work);
 }
 
@@ -1205,7 +1209,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 {
 	unsigned long read_ch_irq, read_usr_irq, pkey, addr;
 	int ret, index, recv_i;
-	int *ws_id;
+	int ws_id;
 	struct pcn_kmsg_message *msg; 
 	struct rpr_work *rpr;
 	
@@ -1218,13 +1222,6 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		ret = xdma_transfer(FROM_DEVICE, PAGE);
 		user_interrupts_enable(PAGE);
 		//PCNPRINTK("Transfer done\n");
-		//return IRQ_HANDLED;
-
-	} else if (read_ch_irq & 0x01) {
-		channel_interrupts_disable(TO_DEVICE, KMSG);
-		//__process_sent(curr_sw);
-		channel_interrupts_enable(TO_DEVICE, KMSG);
-		//PCNPRINTK("Sent message: %x\n", read_ch_irq);		
 		//return IRQ_HANDLED;
 
 	} else if (read_ch_irq & 0x04) {
@@ -1240,19 +1237,6 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		//PCNPRINTK("Time taken to channel_interrupts_enable: %ld\n", end_time - start_time);
 		//return IRQ_HANDLED;)
 
-	} else if (read_ch_irq & 0x02) {
-		channel_interrupts_disable(TO_DEVICE, PAGE);
-		//__page_sent(curr_xw);
-		channel_interrupts_enable(TO_DEVICE, PAGE);
-		//PCNPRINTK("Sent page: %x\n", read_ch_irq);	
-		//return IRQ_HANDLED;
-		
-	} else if (read_ch_irq & 0x08) {
-		channel_interrupts_disable(FROM_DEVICE, PAGE);
-		channel_interrupts_enable(FROM_DEVICE, PAGE);
-		//PCNPRINTK("Received Page: %x\n", read_ch_irq);
-		//return IRQ_HANDLED;
-		
 	} else if (read_usr_irq & 0x01) {
 		////PCNPRINTK("Received in FIFO: %x\n", read_usr_irq);
 		user_interrupts_disable(KMSG);
@@ -1263,15 +1247,39 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(KMSG);
 		//return IRQ_HANDLED;
 
+	} /*else if (read_ch_irq & 0x08) {
+		channel_interrupts_disable(FROM_DEVICE, PAGE);
+		channel_interrupts_enable(FROM_DEVICE, PAGE);
+		PCNPRINTK("Received Page: %x\n", read_ch_irq);
+		//return IRQ_HANDLED;
+		
+	} */ else if (read_usr_irq & 0x10) {
+		user_interrupts_disable(RESP);
+		
+		//PCNPRINTK("Resp intr\n");
+		ws_id = (int)ioread32((u32 *)(xdma_x + wr_wsid));
+		resolve_waiting(ws_id);
+		//__prot_proc_recv(PGRESP);
+		//write_register(PGRESP, (u32 *)(xdma_x + rpr_type));
+	    //pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
+		//start_time = ktime_get_ns();
+		
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("Time taken to queue a vmfc: %ld\n", end_time - start_time);
+		user_interrupts_enable(RESP);
+		//return IRQ_HANDLED;
+
 	} else if (read_usr_irq & 0x04) {
 		//start_time = ktime_get_ns();
 		user_interrupts_disable(RPR_RD);
 		//PCNPRINTK("RPR RD Intr: %x\n", read_usr_irq);
-		//__prot_proc_recv(PGREAD);
+		__prot_proc_recv(PGREAD);
 		//write_register(PGREAD, (u32 *)(xdma_x + rpr_type));
-		rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
-		rpr->x = PGREAD;
-		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+		//rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
+		//rpr->x = PGREAD;
+		//PCNPRINTK("Sending to process\n");
+		//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+		//PCNPRINTK("Sent to process\n");
 		//end_time = ktime_get_ns();
 		//PCNPRINTK("Time taken to user_interrupts_disable: %ld\n", end_time - start_time);
 		//start_time = ktime_get_ns();
@@ -1284,29 +1292,13 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		////PCNPRINTK("Time taken to user_interrupts_enable: %ld\n", end_time - start_time);	
 		//return IRQ_HANDLED;
 
-	} else if (read_usr_irq & 0x80) {
-		user_interrupts_disable(RESP);
-		
-		//PCNPRINTK("Resp intr\n");
-		//__prot_proc_recv(PGRESP);
-		ws_id = (int *)(xdma_x + wr_wsid);
-		resolve_waiting(*ws_id);
-		//write_register(PGRESP, (u32 *)(xdma_x + rpr_type));
-	    //pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
-		//start_time = ktime_get_ns();
-		
-		//end_time = ktime_get_ns();
-		//PCNPRINTK("Time taken to queue a vmfc: %ld\n", end_time - start_time);
-		user_interrupts_enable(RESP);
-		//return IRQ_HANDLED;
-
 	} else if (read_usr_irq & 0x08) {	       
 		user_interrupts_disable(INVAL);
 		//write_register(PGINVAL, (u32 *)(xdma_x + rpr_type));
 		//tasklet_schedule(&tasklet_page);
-		//__prot_proc_recv(PGINVAL);
+		__prot_proc_recv(PGINVAL);
 		//PCNPRINTK("Inval intr: %x\n", read_usr_irq);
-		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
+		//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
 		//start_time = ktime_get_ns();
 		
 		 //__prot_proc_recv(PGINVAL);
@@ -1319,12 +1311,12 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 	} else if (read_usr_irq & 0x20) {
 		user_interrupts_disable(RPR_WR);
 		//PCNPRINTK("RPR Wr intr: %x\n", read_usr_irq);
-		//__prot_proc_recv(PGWRITE);
+		__prot_proc_recv(PGWRITE);
 		//write_register(PGWRITE, (u32 *)(xdma_x + rpr_type));
 		//tasklet_schedule(&tasklet_page);
-		rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
-		rpr->x = PGWRITE;
-		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+		//rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
+		//rpr->x = PGWRITE;
+		//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
 		//start_time = ktime_get_ns();
 		
 
@@ -1336,12 +1328,12 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 	}  else if (read_usr_irq & 0x40) {
 		user_interrupts_disable(VMFC);
 		//PCNPRINTK("VMF Continue intr: %x\n", read_usr_irq);
-		//__prot_proc_recv(VMF_CONTINUE);
+		__prot_proc_recv(VMF_CONTINUE);
 		//write_register(VMF_CONTINUE, (u32 *)(xdma_x + rpr_type));
 		//tasklet_schedule(&tasklet_page);
-		rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
-		rpr->x = VMF_CONTINUE;
-		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+		//rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
+		//rpr->x = VMF_CONTINUE;
+		//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
 		//start_time = ktime_get_ns();
 		
 		
@@ -1350,7 +1342,21 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(VMFC);
 		//return IRQ_HANDLED;
 
-	} else if (read_usr_irq & 0x10) {
+	} /* else if (read_ch_irq & 0x02) {
+		channel_interrupts_disable(TO_DEVICE, PAGE);
+		//__page_sent(curr_xw);
+		channel_interrupts_enable(TO_DEVICE, PAGE);
+		PCNPRINTK("Sent page: %x\n", read_ch_irq);	
+		//return IRQ_HANDLED;
+		
+	} else if (read_ch_irq & 0x01) {
+		channel_interrupts_disable(TO_DEVICE, KMSG);
+		//__process_sent(curr_sw);
+		channel_interrupts_enable(TO_DEVICE, KMSG);
+		PCNPRINTK("Sent message: %x\n", read_ch_irq);		
+		//return IRQ_HANDLED;
+
+	} */ else if (read_usr_irq & 0x80) {
 		user_interrupts_disable(FAULT);
 		printk(KERN_ERR "FAULT intr: %x\n", read_usr_irq);
 		PCNPRINTK("PKEY: %lx and %lx\n", ioread32((u32 *)(xdma_x + wr_pkey_msb)), ioread32((u32 *)(xdma_x + wr_pkey_lsb)));

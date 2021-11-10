@@ -80,6 +80,7 @@ void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg)
 																																																
 	if (ftn != NULL) {
 		ftn(msg);
+		//PCNPRINTK("Called function\n");
 	} else {
 		printk(KERN_ERR"No callback registered for %d\n", type);
 	}
