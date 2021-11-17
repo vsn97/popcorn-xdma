@@ -1036,12 +1036,19 @@ static void prot_handle_rpr(struct work_struct *work)
 	int x, ws_id;
 	struct prot_work *pw = (struct prot_work *)work;
 	x = pw->x;
-	struct rpr_work *rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
-	rpr->x = x;
-	pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
+	//struct rpr_work *rpr = kmalloc(sizeof(*rpr), GFP_ATOMIC);
+	//rpr->x = x;
+	//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, rpr);
 	//prot_proc_handle_rpr(x);
 	//PCNPRINTK("Inside the prot_proc_handle func Work: %d\n", x);
 	//prot_proc_handle_rpr(x);
+	if (x == PGRESP) {
+		ws_id = (int)ioread32((u32 *)(xdma_x + wr_wsid));
+		resolve_waiting(ws_id);
+	} else {
+		xdma_process_remote_page_request(x);
+	}
+	
 	kfree((void *)work);
 }
 
@@ -1049,8 +1056,9 @@ static void prot_handle_inval(struct work_struct *work)
 {
 	//struct prot_work *pw = (struct prot_work *)work;
 	//PCNPRINTK("Inval Intr\n");
-	pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
+	//pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, NULL);
 	//prot_proc_handle_inval();
+	xdma_process_invalidate_request();
 	kfree((void *)work);
 }
 
@@ -1257,9 +1265,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_disable(RESP);
 		
 		//PCNPRINTK("Resp intr\n");
-		ws_id = (int)ioread32((u32 *)(xdma_x + wr_wsid));
-		resolve_waiting(ws_id);
-		//__prot_proc_recv(PGRESP);
+		__prot_proc_recv(PGRESP);
 		//write_register(PGRESP, (u32 *)(xdma_x + rpr_type));
 	    //pcn_kmsg_xdma_process(PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, NULL);
 		//start_time = ktime_get_ns();
@@ -1545,7 +1551,7 @@ static int __init init_kmsg_xdma(void)
 	
 	PCNPRINTK("\n XDMA Layer Configured ...\n");
 
-	my_nid = 1;
+	my_nid = 0;
 	PCNPRINTK("Node number: %d\n", my_nid);
 	write_mynid(my_nid);
 	set_popcorn_node_online(my_nid, true);

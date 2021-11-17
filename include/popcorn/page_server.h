@@ -43,6 +43,8 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
 //void xdma_process_remote_page_req(unsigned long vaddr, unsigned long iaddr,unsigned long dma_addr,unsigned long fault_flags,unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x);
 //void xdma_process_invalidate_req(unsigned long addr, unsigned long iaddr, unsigned long fault_flags,unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid);
 
+void xdma_process_remote_page_request(int x);
+void xdma_process_invalidate_request(void);
 
 //void insert_pkey(unsigned long pkey, unsigned long addr);
 void update_pkey(unsigned long pkey, unsigned long addr);

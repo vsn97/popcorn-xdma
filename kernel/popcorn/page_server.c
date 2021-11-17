@@ -1958,13 +1958,12 @@ out:
 
 /* Protocol Processor Remote Page Request Handler */
 
-static void process_xdma_remote_page_request(struct work_struct *work)
+void xdma_process_remote_page_request(int x)
 {	
-	//PCNPRINTK("Inside the process_xdma_request\n");
-	struct pcn_kmsg_work *pcn_work = (struct pcn_kmsg_work *)work;
-    struct rpr_work *type = pcn_work->msg;
+	//struct pcn_kmsg_work *pcn_work = (struct pcn_kmsg_work *)work;
+    //struct rpr_work *type = pcn_work->msg;
 	//PCNPRINTK("Inside the prot_proc_handle_rpr: %d\n", type->x);
-	remote_page_request_t *req = prot_proc_handle_rpr(type->x);
+	remote_page_request_t *req = prot_proc_handle_rpr(x);
 	//remote_page_response_t *res;
 	
 	struct task_struct *tsk;
@@ -2054,21 +2053,20 @@ out:
 	//pcn_kmsg_post(res_type, from_nid, res, res_size);
 	//PCNPRINTK("Posting response\n");
 	xdma_post_response(res_type, result, from_nid, req->addr, req->origin_pid, req->remote_pid, req->origin_ws, req->pkey);
-	kfree(type);
+	//kfree(type);
 	pcn_kmsg_put(req);
-	kfree(work);
+	//kfree(work);
 	//END_KMSG_WORK(req);
 
 }
-
-//EXPORT_SYMBOL(xdma_process_remote_page_req);
+EXPORT_SYMBOL(xdma_process_remote_page_request);
 
 /* Protocol Processor Invalidate Page Request Handler */
 
-static void process_xdma_invalidate_request(struct work_struct *work)
+void xdma_process_invalidate_request()
 {
 	page_invalidate_request_t *req = prot_proc_handle_inval();
-	struct pcn_kmsg_work *pcn_work = (struct pcn_kmsg_work *)work;
+	//struct pcn_kmsg_work *pcn_work = (struct pcn_kmsg_work *)work;
 	//page_invalidate_response_t *res;
 	struct task_struct *tsk;
 	int from_nid = req->from_nid;
@@ -2096,10 +2094,9 @@ static void process_xdma_invalidate_request(struct work_struct *work)
 	put_task_struct(tsk);
 	//END_KMSG_WORK(req);
 	pcn_kmsg_put(req);
-	kfree(work);
+	//kfree(work);
 }
-
-//EXPORT_SYMBOL(xdma_process_invalidate_req);
+EXPORT_SYMBOL(xdma_process_invalidate_request);
 
 /*
 void insert_pkey(unsigned long pkey, unsigned long addr)
@@ -2677,7 +2674,6 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 	unsigned long pkey = 0;
 	unsigned long *pkey_res;
 	struct pcn_kmsg_xdma_handle *xh;
-	void *resp;
 	remote_page_response_t *rp;
 	page_invalidate_response_t *in_res;
 	struct remote_context *rc = __get_mm_remote(vmf->vma->vm_mm);
@@ -2761,8 +2757,7 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 		}
 	}
 
-	peers = 1;
-	ws = get_wait_station_multiple(tsk, peers);
+	ws = get_wait_station(tsk);
 	//PCNPRINTK("Got wait stations\n");
 	if(r_nid != my_nid) {
 		rpid = rc->remote_tgids[r_nid];
@@ -2948,25 +2943,25 @@ out:
  * Routing popcorn messages to workers
  */
 DEFINE_KMSG_WQ_HANDLER(remote_page_request);
-DEFINE_KMSG_WQ_HANDLER(xdma_remote_page_request);
+//DEFINE_KMSG_WQ_HANDLER(xdma_remote_page_request);
 DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
-DEFINE_KMSG_WQ_HANDLER(xdma_invalidate_request);
+//DEFINE_KMSG_WQ_HANDLER(xdma_invalidate_request);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
 {
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
-	REGISTER_KMSG_WQ_HANDLER(
-			PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, xdma_remote_page_request);
+	//REGISTER_KMSG_WQ_HANDLER(
+			//PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST, xdma_remote_page_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT, remote_page_response);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
-	REGISTER_KMSG_WQ_HANDLER(
-			PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, xdma_invalidate_request);
+	//REGISTER_KMSG_WQ_HANDLER(
+			//PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST, xdma_invalidate_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
 	REGISTER_KMSG_WQ_HANDLER(
