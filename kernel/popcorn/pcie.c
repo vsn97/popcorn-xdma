@@ -70,10 +70,12 @@ void init_descriptor_bypass(void)
 	write_register(1, xdma_axi + N1);
 	write_register(0x13, xdma_axi + Ctl2);
 	write_register(1, xdma_axi + N2);
+	/*
 	write_register(0x13, xdma_axi + Ctl3);
 	write_register(1, xdma_axi + N3);
 	write_register(0x13, xdma_axi + Ctl4);
 	write_register(1, xdma_axi + N4);
+	*/
 }
 
 EXPORT_SYMBOL(init_descriptor_bypass);
@@ -83,23 +85,23 @@ int init_xdma(void)
 	/* Resetting the XDMA */
 
 	write_register(0, xdma_ctl + h2c_ctl);
-	write_register(0, xdma_ctl + h2c1_ctl);
+	//write_register(0, xdma_ctl + h2c1_ctl);
 	write_register(0, xdma_ctl + c2h_ctl);
-	write_register(0, xdma_ctl + c2h1_ctl);
+	//write_register(0, xdma_ctl + c2h1_ctl);
 
 	/* Configuring the Interrupt Enable Masks */
 
 	write_register(0x30003, xdma_ctl + sgdma);
 	write_register(0x04, xdma_ctl + h2cintr);
-	write_register(0x04, xdma_ctl + h2c1intr);
+	//write_register(0x04, xdma_ctl + h2c1intr);
 	write_register(0x04, xdma_ctl + c2hintr);
-	write_register(0x04, xdma_ctl + c2h1intr);
+	//write_register(0x04, xdma_ctl + c2h1intr);
 
-	write_register(0x04, xdma_ctl + ch_irqen);
-	write_register(0xFF, xdma_ctl + usr_irqen);
+	write_register(0x03, xdma_ctl + ch_irqen);
+	write_register(0x3F, xdma_ctl + usr_irqen);
 
-	return (read_register(xdma_ctl + h2c_ctl) || read_register(xdma_ctl + h2c1_ctl) || 
-		read_register(xdma_ctl + c2h_ctl) || read_register(xdma_ctl + c2h1_ctl));
+	return (read_register(xdma_ctl + h2c_ctl) ||
+		read_register(xdma_ctl + c2h_ctl));
 
 }
 
@@ -110,19 +112,20 @@ void init_xxv(void)
 	/* Enabling the RX and TX in the Ethernet Subsystem */
 
 	write_register(0x01, xdma_axi + xxv_rxen);
-	write_register(0x01, xdma_axi + xxv1_rxen);
-	write_register(0x01, xdma_axi + xxv2_rxen);
+	//write_register(0x01, xdma_axi + xxv1_rxen);
+	//write_register(0x01, xdma_axi + xxv2_rxen);
 	write_register(0x10, xdma_axi + xxv_txen);
-	write_register(0x10, xdma_axi + xxv1_txen);
-	write_register(0x10, xdma_axi + xxv2_txen);
+	//write_register(0x10, xdma_axi + xxv1_txen);
+	//write_register(0x10, xdma_axi + xxv2_txen);
 
 	msleep(100);
 	write_register(0, xdma_axi + xxv_txen);
-	write_register(0, xdma_axi + xxv1_txen);
-	write_register(0, xdma_axi + xxv2_txen);
+	//write_register(0, xdma_axi + xxv1_txen);
+	//write_register(0, xdma_axi + xxv2_txen);
+	msleep(100);
 	write_register(0x01, xdma_axi + xxv_txen);
-	write_register(0x01, xdma_axi + xxv1_txen);
-	write_register(0x01, xdma_axi + xxv2_txen);
+	//write_register(0x01, xdma_axi + xxv1_txen);
+	//write_register(0x01, xdma_axi + xxv2_txen);
 
 }
 
@@ -130,11 +133,8 @@ EXPORT_SYMBOL(init_xxv);
 
 void channel_interrupts_disable(int z, int x)
 {
-	write_register(0x00, (u32 *)(xdma_ctl + c2h_ctl));
-	write_register(0x04, (u32 *)(xdma_ctl + ch_irq_mask));
-	read_register((u32 *)(xdma_ctl + c2h_stat));
 	//PCNPRINTK("Inside channel interrupts disable\n");
-	/*
+	
 	if(z) {
 		if(!x) {
 
@@ -143,33 +143,33 @@ void channel_interrupts_disable(int z, int x)
 			read_register((u32 *)(xdma_ctl + h2c_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
-		} else {
+		} /* else {
 
 			write_register(0x00, (u32 *)(xdma_ctl + h2c1_ctl));
 			write_register(0x02, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + h2c1_stat));
 			//i = ioread32((u32 *)(xdma_ctl + irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
-		}
+		} */
 	} else {
 		if(!x) {
 			//("Pending Interrupts: %d\n", read_register(xdma_ctl + ch_irq_pending));
 		    write_register(0x00, (u32 *)(xdma_ctl + c2h_ctl));
-		    write_register(0x04, (u32 *)(xdma_ctl + ch_irq_mask));
+		    write_register(0x02, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + c2h_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
 			//PCNPRINTK("Pending Interrupts: %d\n", read_register(xdma_ctl + ch_irq_pending));
 			//while(read_register(xdma_ctl + ch_irq));
-		} else {
+		} /* else {
 
 			write_register(0x00, (u32 *)(xdma_ctl + c2h1_ctl));
 			write_register(0x08, (u32 *)(xdma_ctl + ch_irq_mask));
 			read_register((u32 *)(xdma_ctl + c2h1_stat));
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
 			//while(read_register(xdma_ctl + ch_irq) | 0x08);
-		}
+		} */
 	}
-	*/
+	
 
 	//PCNPRINTK("Exiting channel interrupts disable\n");
 }
@@ -178,30 +178,30 @@ EXPORT_SYMBOL(channel_interrupts_disable);
 
 void channel_interrupts_enable(int z, int x)
 {
-	write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x04, (u32 *)(xdma_ctl + ch_irq_enable));
+	//write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x04, (u32 *)(xdma_ctl + ch_irq_enable));
 	//PCNPRINTK("Inside channel interrupts disable\n");
-	/* if(z) {
+	 if(z) {
 		if(!x) {
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
 			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x01, (u32 *)(xdma_ctl + ch_irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
-		} else {
+		} /*else {
 			//i = ioread32((u32 *)(xdma_ctl + irq_enable));
 			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x02, (u32 *)(xdma_ctl + ch_irq_enable));
 			//while(read_register(xdma_ctl + ch_irq));
-		}
+		} */
 	} else {
 		if(!x) {
 
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
-			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x04, (u32 *)(xdma_ctl + ch_irq_enable));
+			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x02, (u32 *)(xdma_ctl + ch_irq_enable));
 
-		} else {
+		} /*else {
 
 			//i = read_register((u32 *)(xdma_ctl + irq_enable));
 			write_register(ioread32((u32 *)(xdma_ctl + ch_irq_enable)) | 0x08, (u32 *)(xdma_ctl + ch_irq_enable));
-		}
-	} */
+		} */
+	} 
 
 	//PCNPRINTK("Exiting channel interrupts disable\n");
 }
@@ -210,36 +210,26 @@ EXPORT_SYMBOL(channel_interrupts_enable);
 
 void user_interrupts_disable(int x)
 {
+	//PCNPRINTK("In user_interrupts disable\n");
 	if (!x) {
 		write_register(0x01, (u32 *)(xdma_ctl + usr_irq_mask));
 		
-	} else if (x == PAGE){
+	} /* else if (x == PAGE){
 		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
-	} else if (x == RPR_RD){
-		write_register(0x04, (u32 *)(xdma_ctl + usr_irq_mask));
+	} */else if (x == RPR_RD){
+		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == INVAL){
 		write_register(0x08, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x02, (u32 *)(xdma_axi + proc_mask));
-	} else if (x == RESP){
-		write_register(0x10, (u32 *)(xdma_ctl + usr_irq_mask));
-		write_register(0x8000, (u32 *)(xdma_axi + proc_mask));
-	} /* else if(x == MKWRITE){
-		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
-		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
-		write_register(0x20, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == FETCH){
-		write_register(0x40, (u32 *)(xdma_ctl + usr_irq_mask));
-		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
-		write_register(0x10, (u32 *)(xdma_axi + proc_mask));
-	} */else if (x == RPR_WR){
-		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
+	} else if (x == RPR_WR){
+		write_register(0x04, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == VMFC){
-		write_register(0x40, (u32 *)(xdma_ctl + usr_irq_mask));
+		write_register(0x10, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == FAULT){
-		write_register(0x10, (u32 *)(xdma_ctl + usr_irq_mask));
+		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
 		write_register(0x08, (u32 *)(xdma_axi + proc_mask));
 	} else {
@@ -252,33 +242,25 @@ EXPORT_SYMBOL(user_interrupts_disable);
 
 void user_interrupts_enable(int x)
 {
-	if (!x) {
+	//PCNPRINTK("In user_interrupts enable\n");
+	 if (!x) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x01, (u32 *)(xdma_ctl + usr_irq_enable));
-	} else if (x == PAGE) {
+	} /* else if (x == PAGE) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
-	} else if (x == RPR_RD) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x04, (u32 *)(xdma_ctl + usr_irq_enable));
+	} */ else if (x == RPR_RD) {
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == INVAL) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x08, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} else if (x == RESP) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x10, (u32 *)(xdma_ctl + usr_irq_enable));
-		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} /* else if(x == MKWRITE) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
-		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} else if(x == FETCH) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x40, (u32 *)(xdma_ctl + usr_irq_enable));
-		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} */else if (x == RPR_WR) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
+	} else if (x == RPR_WR) {
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x04, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == VMFC) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x40, (u32 *)(xdma_ctl + usr_irq_enable));
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x10, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == FAULT) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x80, (u32 *)(xdma_ctl + usr_irq_enable));
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_enable\n");
@@ -306,33 +288,32 @@ int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z)
 			write_register(size, xdma_axi + length1);
 			return 0;
 
-		} else {
+		} /* else {
 
 			write_register(addr_msb, xdma_axi + SA3);
 			write_register(addr_lsb, xdma_axi + SA3 + 0x04);
 			write_register(0x1000, xdma_axi + length3);
 			return 0;
 
-		}
-	} else {
+		} */
+	}  else {
 		if(!z) {
-
+			//PCNPRINTK("Written descriptors\n");
 			write_register(addr_msb, xdma_axi + DA2);
 			write_register(addr_lsb, xdma_axi + DA2 + 0x04);
 			write_register(size, xdma_axi + length2);
 			return 0;
 
-		} else {
+		} /* else {
 
 			write_register(addr_msb, xdma_axi + DA4);
 			write_register(addr_lsb, xdma_axi + DA4 + 0x04);
 			write_register(0x1020, xdma_axi + length4);
 			return 0;
 
-		}
+		} */
 	}
 }
-
 EXPORT_SYMBOL(config_descriptors_bypass);
 
 int xdma_transfer(int y, int z)
@@ -344,20 +325,21 @@ int xdma_transfer(int y, int z)
 			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + h2c_ch));
 			write_register(0xFFFE25, xdma_ctl + h2c_ctl);
 			write_register(0x01, xdma_axi + Control1);
+			//write_register(0x00, (u32 *)(xdma_axi + switch_M0_mux));
 			return 0;
 
-		} else {
+		}/* else {
 
 			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + h2c1_ch));
 			write_register(0xFFFE25, xdma_ctl + h2c1_ctl);
 			write_register(0x01, xdma_axi + Control3);
 			return 0;
 
-		}
+		}*/
 	} else {
 		if(!z) {
 
-			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + c2h_ch));
+			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + c2h_ctl));
 			//while(read_register(xdma_ctl + c2h_ch));
 			write_register(0xFFFE25, xdma_ctl + c2h_ctl);
 			write_register(0x01, xdma_axi + Control2);
@@ -365,17 +347,16 @@ int xdma_transfer(int y, int z)
 			//while((read_register(xdma_ctl + ch_irq) & 0x04));
 			return 0;
 
-		} else {
+		} /* else {
 
 			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + c2h1_ch));
 			write_register(0xFFFE25, xdma_ctl + c2h1_ctl);
 			write_register(0x01, xdma_axi + Control4);
 			return 0;
 
-		}
+		} */
 	}
 }
-
 EXPORT_SYMBOL(xdma_transfer);
 
 /* Protocol Processor Functions */
@@ -384,8 +365,8 @@ void resolve_waiting(int ws_id)
 {
 	struct wait_station *ws;
 	ws = wait_station(ws_id);
-	ws->res = (int)ioread32((u32 *)(xdma_axi + wr_vm_res));
-	ws->resp_type = (int)ioread32((u32 *)(xdma_axi + wr_page_resp));
+	//ws->res = (int)ioread32((u32 *)(xdma_axi + wr_vm_res));
+	//ws->resp_type = (int)ioread32((u32 *)(xdma_axi + wr_page_resp));
 
 	//PCNPRINTK("Inside resolve_waiting: %d and %d and %d\n", ws_id, ws->res, ws->resp_type);		
 	
@@ -397,13 +378,12 @@ EXPORT_SYMBOL(resolve_waiting);
 
 /* Local Fault Handler */
 
-void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, unsigned long pkey, 
+void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigned long iaddr, unsigned long pkey, 
 	pid_t opid, pid_t rpid, int from_nid, unsigned long fflags, int ws_id, int tsk_remote)
 {	    
 		//PCNPRINTK("Inside the prot_proc handle localfault func: %d and %d and %d and %llx and %llx and %llx\n", ws_id, opid, tsk_remote, fflags, vmf, vaddr);
 		spin_lock(&prot_proc_lock);
-  		write_register((u32)((dma_addr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_daddr_msb));
-		write_register((u32)(dma_addr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_daddr_lsb));
+		//write_register(0x01, (u32 *)(xdma_axi + switch_M0_mux));
 		//PCNPRINTK("Wrote the DMA Addr: %lx and %lx\n", ioread32((u32 *)(xdma_axi + proc_daddr_msb)), ioread32((u32 *)(xdma_axi + proc_daddr_lsb)));
 		write_register((u32)((vaddr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_vaddr_msb));
 		write_register((u32)(vaddr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_vaddr_lsb));
@@ -463,7 +443,7 @@ void * prot_proc_handle_rpr(int x)
 	req->addr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_vaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_vaddr_lsb)));
 	req->from_nid = (int)ioread32((u32 *)(xdma_axi + wr_nid));
 	req->instr_addr = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_iaddr_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_iaddr_lsb)));
-	req->rdma_addr = ioread32((u32 *)(xdma_axi + wr_daddr_lsb));
+	//req->rdma_addr = ioread32((u32 *)(xdma_axi + wr_daddr_lsb));
 	req->fault_flags = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_fflags_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_fflags_lsb)));
 	req->pkey = ((unsigned long long) ioread32((u32 *)(xdma_axi + wr_pkey_msb)) << 32 | ioread32((u32 *)(xdma_axi + wr_pkey_lsb)));
 	req->type = x;
@@ -575,6 +555,31 @@ void pending()
 	//PCNPRINTK("Ch IRQ Pending: %lx and %lx\n", read_ch_irq, read_ch_pend);
 }
 EXPORT_SYMBOL(pending);
+
+void req_test()
+{
+	int i;
+	dsm_proc_request_t *req = pcn_kmsg_get(sizeof(*req));
+	
+	PCNPRINTK("---REQ FRAME BEFORE FILLING--- : %d\n", sizeof(*req));
+	pcn_kmsg_sample(PCN_KMSG_TYPE_PROT_PROC_REQUEST, req, sizeof(*req));
+
+	req->pkey = 0xEEEE000010000000;
+	req->flags = 0xFFFF000020000000;
+	req->addr = 0xADDA000030000000;
+	req->remote_pid = 0xABCD1234;
+	req->origin_pid = 0xEF567890;
+	req->from_nid = 2004;
+	req->ws_id = 1989;
+
+	PCNPRINTK("---REQ FRAME AF FILLING---\n");
+	pcn_kmsg_sample(PCN_KMSG_TYPE_PROT_PROC_REQUEST, req, sizeof(*req));
+	
+	pcn_kmsg_put(req);
+	//PCNPRINTK("Usr_IRQ Pending: %lx and %lx\n", read_usr_irq, read_usr_pend);
+	//PCNPRINTK("Ch IRQ Pending: %lx and %lx\n", read_ch_irq, read_ch_pend);
+}
+EXPORT_SYMBOL(req_test);
 
 int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g)
 {

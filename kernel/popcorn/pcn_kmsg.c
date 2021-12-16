@@ -82,7 +82,7 @@ void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg)
 		ftn(msg);
 		//PCNPRINTK("Called function\n");
 	} else {
-		printk(KERN_ERR"No callback registered for %d\n", type);
+		printk(KERN_ERR "No callback registered for %d\n", type);
 	}
 }
 EXPORT_SYMBOL(pcn_kmsg_xdma_process);
@@ -93,7 +93,7 @@ int check_msg_type(struct pcn_kmsg_message *msg)
 	if(msg != NULL){
 		return msg->header.type;
 	} else {
-		PCNPRINTK("Message is nULl\n");
+		printk(KERN_ERR "Message is empty!");
 	}
 	
 }
@@ -268,6 +268,21 @@ void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_dump);
 
+void pcn_kmsg_sample(enum pcn_kmsg_type type, void *req_msg, size_t size)
+{
+	int i;
+	struct pcn_kmsg_message *msg = req_msg;
+	msg->header.type = type;
+	msg->header.prio = PCN_KMSG_PRIO_NORMAL;
+	msg->header.size = size;
+	PCNPRINTK("---REQ FRAME ---\n");
+	for (i = 0; i < 50; i++) {
+		printk(KERN_INFO "%lx\n", ioread32((u32 *)msg+i));
+	}
+	//account_pcn_message_sent(msg);
+	//return transport->send(to, msg, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_sample);
 
 int __init pcn_kmsg_init(void)
 {

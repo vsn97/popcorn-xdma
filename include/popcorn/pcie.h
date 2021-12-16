@@ -21,15 +21,17 @@
 /* Offset Addresses */
 
 #define desc_byp1 0x0000
-#define desc_byp2 0x8000
-#define desc_byp3 0x18000
-#define desc_byp4 0x10000
+//#define desc_byp2 0x8000
+//#define desc_byp3 0x18000
+#define desc_byp2 0x10000
 
 #define xxv_0 0x40000
 #define xxv_1 0x80000
 #define xxv_2 0xC0000
 
 #define dsm_proc 0x20000
+
+#define switch_ctl 0x80000
 
 /* Register Offsets of Xilinx XDMA */
 
@@ -100,7 +102,7 @@
 #define length2 desc_byp2 + 0x14
 #define N2 desc_byp2 + 0x18
 
-/* H2C Descriptor - Channel 1 Bypass Configuration */
+/* H2C Descriptor - Channel 1 Bypass Configuration 
 
 #define Ctl3 desc_byp3 + 0x00
 #define Control3 desc_byp3 + 0x1C
@@ -109,7 +111,7 @@
 #define length3 desc_byp3 + 0x14
 #define N3 desc_byp3 + 0x18
 
-/* C2H Descriptor - Channel 1 Bypass Configuration */
+/* C2H Descriptor - Channel 1 Bypass Configuration 
 
 #define Ctl4 desc_byp4 + 0x00
 #define Control4 desc_byp4 + 0x1C
@@ -161,8 +163,12 @@
 #define wr_page_resp dsm_proc + 0x80
 #define wr_vm_res dsm_proc + 0x84
 
-#define thresh 400
 
+/* Switch Control Regs */
+
+//#define switch_M0_mux switch_ctl + 0x40
+
+#define thresh 768
 
 void write_register(u32 value, void *iomem);
 inline u32 read_register(void *iomem);
@@ -180,7 +186,7 @@ void __iomem * return_iomaps(int x);
 
 /* Prot_Proc Functions */
 
-void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, dma_addr_t dma_addr, unsigned long iaddr, 
+void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigned long iaddr, 
 	unsigned long pkey, pid_t opid, pid_t rpid, int nid, unsigned long fflags, int ws_id, int tsk_remote);
 void * prot_proc_handle_rpr(int x);
 void * prot_proc_handle_inval(void);
@@ -190,5 +196,6 @@ void xdma_post_response(enum pcn_kmsg_type type, int result, int from_nid, unsig
 unsigned long current_pkey(void);
 void resolve_waiting(int ws_id);
 void pending(void);
+void req_test(void);
 
 #endif

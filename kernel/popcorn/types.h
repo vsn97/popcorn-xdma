@@ -318,6 +318,16 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 	int x;
 DEFINE_PCN_KMSG(rpr_type_t, REMOTE_PAGE_RESPONSE_TYPE_FIELDS);
 
+#define PROT_PROC_REQUEST_TYPE_FIELDS \
+	pid_t origin_pid; \
+	int from_nid; \
+	pid_t remote_pid; \
+	int ws_id; \
+	unsigned long addr; \
+	unsigned long flags; \
+	unsigned long pkey; 
+DEFINE_PCN_KMSG(dsm_proc_request_t, PROT_PROC_REQUEST_TYPE_FIELDS);
+
 /**
  * Futex
  */

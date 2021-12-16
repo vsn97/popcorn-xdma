@@ -67,6 +67,7 @@ enum pcn_kmsg_type {
 	/* XDMA Functions */
 	PCN_KMSG_TYPE_XDMA_REMOTE_PAGE_REQUEST,
 	PCN_KMSG_TYPE_XDMA_INVALIDATE_REQUEST,
+	PCN_KMSG_TYPE_PROT_PROC_REQUEST,
 	
 	PCN_KMSG_TYPE_MAX
 };
@@ -170,6 +171,9 @@ void pcn_kmsg_stat(struct seq_file *seq, void *v);
  * Return the message type
  */
 int check_msg_type(struct pcn_kmsg_message *msg);
+
+
+void pcn_kmsg_sample(enum pcn_kmsg_type type, void *req_msg, size_t size);
 
 struct pcn_kmsg_rdma_handle {
 	u32 rkey;
