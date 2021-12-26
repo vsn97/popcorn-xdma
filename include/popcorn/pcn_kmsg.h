@@ -151,9 +151,9 @@ void pcn_kmsg_put(void *msg);
 void pcn_kmsg_process(struct pcn_kmsg_message *msg);
 
 /**
- * Process the received messag @msg for XDMA. 
+ * Process the received message @msg for XDMA. 
  */
-void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg);
+void pcn_kmsg_xdma_process(enum pcn_kmsg_type type,void *msg);
 
 /**
  * Return received message @msg after handling to recyle it. @msg becomes

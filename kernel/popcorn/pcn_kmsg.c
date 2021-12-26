@@ -8,11 +8,19 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/err.h>
+#include <linux/time.h> 
+#include <linux/timekeeping.h>
 
 #include <popcorn/pcn_kmsg.h>
+#include <popcorn/page_server.h>
+#include <popcorn/pcie.h>
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
 #include <popcorn/bundle.h>
+
+#include "types.h"
+
+u64 sttart_time, ennd_time; 
 
 static pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
 
@@ -77,12 +85,11 @@ void pcn_kmsg_xdma_process(enum pcn_kmsg_type type, void *msg)
 	pcn_kmsg_cbftn ftn;
 
 	ftn = pcn_kmsg_cbftns[type];
-																																																
+
 	if (ftn != NULL) {
 		ftn(msg);
-		//PCNPRINTK("Called function\n");
 	} else {
-		printk(KERN_ERR "No callback registered for %d\n", type);
+		printk(KERN_ERR"No callback registered for %d\n", type);
 	}
 }
 EXPORT_SYMBOL(pcn_kmsg_xdma_process);

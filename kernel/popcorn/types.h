@@ -318,16 +318,6 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 	int x;
 DEFINE_PCN_KMSG(rpr_type_t, REMOTE_PAGE_RESPONSE_TYPE_FIELDS);
 
-#define PROT_PROC_REQUEST_TYPE_FIELDS \
-	pid_t origin_pid; \
-	int from_nid; \
-	pid_t remote_pid; \
-	int ws_id; \
-	unsigned long addr; \
-	unsigned long flags; \
-	unsigned long pkey; 
-DEFINE_PCN_KMSG(dsm_proc_request_t, PROT_PROC_REQUEST_TYPE_FIELDS);
-
 /**
  * Futex
  */
@@ -389,6 +379,25 @@ DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
        int sig;                                         \
        bool group;
 DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
+
+/** 
+ *DSM Processor Request fields  
+ */
+
+typedef struct {
+	unsigned long page_key; 
+	pid_t origin_pid; 
+	pid_t remote_pid; 
+	int from_nid;  
+	int ws_id; 
+	int page_mode; 
+	unsigned long fault_flags; 
+	unsigned long addr; 
+	unsigned long instr_addr;
+} __attribute__((packed)) dsm_proc_request_t;
+
+	
+
 /**
  * Message routing using work queues
  */

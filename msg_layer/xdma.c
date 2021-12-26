@@ -37,6 +37,10 @@
 #define XDMA_SLOT_SIZE PAGE_SIZE * 2
 #define XDMA_SLOTS 320
 
+u8 *c2h_poll_addr;
+u8 *h2c_poll_addr;
+dma_addr_t c2h_poll_bus;
+dma_addr_t h2c_poll_bus;
 
 u64 start_time, end_time, res_time, end_time1, end_time2; 
 
@@ -55,7 +59,10 @@ static struct pci_dev *pci_dev;
 static char *__xdma_sink_address;
 static dma_addr_t __xdma_sink_dma_address;
 static struct workqueue_struct *wq;
+
 static struct task_struct *tsk;
+static struct task_struct *poll_tsk;
+
 struct semaphore q_empty;
 struct semaphore q_full;
 
@@ -93,7 +100,7 @@ enum {
 
 	PGREAD = 0,
 	PGWRITE = 1,
-	VMF_CONTINUE = 2,
+	VMFC = 2,
 	PGINVAL = 3,
 	PGRESP = 4,
 };
@@ -102,13 +109,13 @@ enum {
 
 	KMSG = 0,
 	PAGE = 1,
-	RPR_RD = 2,
-	INVAL = 3,
+	//RPR_RD = 2,
+	//INVAL = 3,
 	FAULT = 4,
-	MKWRITE = 5,
-	RESP = 6,
-	RPR_WR = 7,
-	VMFC = 8,
+	//MKWRITE = 5,
+	//RESP = 6,
+	//RPR_WR = 7,
+	//VMFC = 8,
 };
 
 enum {
@@ -207,6 +214,12 @@ struct rb_alloc_header {
 
 };
 
+struct xdma_poll_wb {
+	u32 completed_desc_count;
+	u32 reserved_1[7];
+} __packed;
+
+
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
 static DEFINE_SPINLOCK(send_work_pool_lock);
@@ -238,7 +251,7 @@ static void __update_recv_index(queue_tr *q, int i)
 	dma_addr = q->work_list[i]->dma_addr;
 	//addr = q->work_list[i]->addr;
 
-	ret = config_descriptors_bypass(dma_addr, PCN_KMSG_MAX_SIZE, FROM_DEVICE, KMSG);
+	ret = config_descriptors_bypass(dma_addr, C2H_MAX_SIZE, FROM_DEVICE, KMSG);
 	//ret = xdma_transfer(FROM_DEVICE, KMSG);
 	//PCNPRINTK("Updated Recv Index: %llx\n", dma_addr);
 }
@@ -385,6 +398,23 @@ remap:
 
 }
 */
+
+void process_message(int recv_i)
+{
+	struct pcn_kmsg_message *msg;
+	//dsm_proc_t *proc = kmalloc(sizeof(dsm_proc_t), GFP_ATOMIC);
+	//ret = __process_received(recv_queue->work_list[recv_i]);
+	msg = recv_queue->work_list[recv_i]->addr;
+
+	if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
+		//printk(KERN_ERR "------- Faulty Work Rejected -----------!!\n");
+		pcn_kmsg_xdma_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);
+		
+	} else {
+		//PCNPRINTK("Sending to process\n");
+		pcn_kmsg_process(msg);
+	}
+}
 
 static struct send_work *__get_xdma_send_work_map(struct pcn_kmsg_message *msg, size_t size)
 {
@@ -614,7 +644,7 @@ static int deq_send(queue_t *q)
 	//curr_sw = work;
 	//PCNPRINTK("Curr sw updated\n");
 	ret = config_descriptors_bypass(work->dma_addr, work->length, TO_DEVICE, KMSG);
-	ret = xdma_transfer(TO_DEVICE, KMSG);
+	ret = xdma_transfer(TO_DEVICE);
 	//PCNPRINTK("xdma_transfer done\n");
 	spin_unlock(&xdma_lock);
 	__process_sent(work);
@@ -657,7 +687,7 @@ int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 	//curr_sw = work;
 	//PCNPRINTK("Curr sw updated\n");
 	ret = config_descriptors_bypass(work->dma_addr, work->length, TO_DEVICE, KMSG);
-	ret = xdma_transfer(TO_DEVICE, KMSG);
+	ret = xdma_transfer(TO_DEVICE);
 	//PCNPRINTK("xdma_transfer done\n");
 	spin_unlock(&xdma_lock);
 
@@ -713,7 +743,7 @@ int xdma_kmsg_write(int to_nid, dma_addr_t raddr, void *addr, size_t size)
 	spin_lock(&xdma_lock);
 	ret = config_descriptors_bypass(xw->dma_addr, size, TO_DEVICE, PAGE);
 	//res_time = ktime_get_ns();
-	ret = xdma_transfer(TO_DEVICE, PAGE);
+	ret = xdma_transfer(TO_DEVICE);
 	spin_unlock(&xdma_lock);
 	/* if(!try_wait_for_completion(&done)) {
 		wait_for_completion(&done);
@@ -742,7 +772,7 @@ int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 	//curr_sw = work;
 	//PCNPRINTK("Curr sw updated\n");
 	ret = config_descriptors_bypass(work->dma_addr, work->length, TO_DEVICE, KMSG);
-	ret = xdma_transfer(TO_DEVICE, KMSG);
+	ret = xdma_transfer(TO_DEVICE);
 	//PCNPRINTK("xdma_transfer done\n");
 	spin_unlock(&xdma_lock);
 	__process_sent(work);
@@ -823,7 +853,6 @@ void xdma_kmsg_stat(struct seq_file *seq, void *v)
 
 static int send_handler(void* arg0)
 {
-	bool was_frozen;
 	int i;
 	//PCNPRINTK("Send Handler is ready\n");
 
@@ -835,6 +864,52 @@ static int send_handler(void* arg0)
 				printk(KERN_ERR "Error sending message\n");
 			}
 		}
+
+	return 0;
+}
+
+static int poll_dma(void* arg0)
+{
+	bool was_frozen;
+	struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
+	struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
+	u32 c2h_desc_complete = 0;
+	u32 h2c_desc_complete = 0;
+
+	int recv_index = 0, index = 0;
+
+	//PCNPRINTK("Send Handler is ready\n");
+
+	while (!kthread_freezable_should_stop(&was_frozen))	{
+
+		c2h_desc_complete = poll_c2h_wb->completed_desc_count;
+		h2c_desc_complete = poll_h2c_wb->completed_desc_count;
+
+		if(c2h_desc_complete != 0) {
+			write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
+			write_register(0x06, (u32 *)(xdma_c + c2h_ch));
+
+			//printk(KERN_INFO "Received message: %lx\n", c2h_desc_complete);
+			index = __get_recv_index(recv_queue);
+			__update_recv_index(recv_queue, index + 1);
+			
+			recv_index = recv_queue->size;
+			poll_c2h_wb->completed_desc_count = 0;
+			recv_queue->size += 1;
+			if (recv_queue->size == recv_queue->nr_entries) {
+				recv_queue->size = 0;
+			}
+
+			process_message(recv_index);
+
+		} else if (h2c_desc_complete != 0) {
+			write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
+			write_register(0x06, (u32 *)(xdma_c + h2c_ch));
+
+			poll_h2c_wb->completed_desc_count = 0;
+			//printk(KERN_INFO "Sent message: %lx\n", h2c_desc_complete);
+		}
+	}
 
 	return 0;
 }
@@ -1050,23 +1125,12 @@ static int __process_received(struct recv_work *rws)
 
 void tasklet_func(unsigned long arg)
 {
-	struct pcn_kmsg_message *msg;
-	int recv_i, i;
-	recv_i = recv_queue->size;
-	//ret = __process_received(recv_queue->work_list[recv_i]);
-	msg = recv_queue->work_list[recv_i]->addr;
-	//PCNPRINTK("___ Recv message Start ____\n");
-	//for (i = 0; i < 50; i++) {
-		//printk("%lx\n", ioread32((u32 *)msg+i));
-	//}
-	//PCNPRINTK("___ Recv message End ____\n");
-	recv_queue->size += 1;
-	if(recv_queue->size == recv_queue->nr_entries) {
-		recv_queue->size = 0;
-	}
-	pcn_kmsg_process(msg);
+	int ret;
+	
 }
 
+
+/*
 void tasklet_page_func(unsigned long arg)
 {
 	int *pgtype, *ws_id;
@@ -1087,6 +1151,7 @@ void tasklet_page_func(unsigned long arg)
 	}
 
 }
+
 
 static void prot_handle_rpr(struct work_struct *work)
 {
@@ -1146,7 +1211,7 @@ static void __prot_proc_recv(int x)
 		PCNPRINTK("Work already exists\n");
 	}
 }
-
+*/
 
 static __init queue_tr* __setup_recv_buffer(int entries)
 {
@@ -1274,13 +1339,11 @@ out_unmap:
 
 static irqreturn_t xdma_isr(int irq, void *dev_id)
 {
-	unsigned long read_ch_irq, read_usr_irq, pkey, addr;
-	int ret, index, recv_i, i;
-	int ws_id;
-	struct pcn_kmsg_message *msg; 
-	struct rpr_work *rpr;
+	unsigned long read_usr_irq, pkey, addr;
+	int ret;
+	//unsigned long *read = (unsigned long *)(xdma_c + usr_irq);
 	
-	read_ch_irq = read_register(xdma_c + ch_irq);
+	//read_ch_irq = read_register(xdma_c + ch_irq);
 	read_usr_irq = read_register(xdma_c + usr_irq);
 	
 	/* if (read_usr_irq & 0x02) {
@@ -1291,11 +1354,11 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		//PCNPRINTK("Transfer done\n");
 		//return IRQ_HANDLED;
 
-	} */ if (read_ch_irq & 0x02) {
+	} if (read_ch_irq & 0x02) {
 		//start_time = ktime_get_ns();
 		channel_interrupts_disable(FROM_DEVICE, KMSG);
 		//end_time = ktime_get_ns();
-		//PCNPRINTK("Time taken to channel_interrupts_disable: %ld\n", end_time - start_time);
+		PCNPRINTK("Time taken \n");
 
 		index = __get_recv_index(recv_queue);
 		__update_recv_index(recv_queue, index + 1);
@@ -1310,20 +1373,21 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		channel_interrupts_disable(TO_DEVICE, KMSG);
 		//__process_sent(curr_sw);
 		channel_interrupts_enable(TO_DEVICE, KMSG);
-		//PCNPRINTK("Sent message: %x\n", read_ch_irq);		
+		PCNPRINTK("Sent message: %x\n", read_ch_irq);		
 		//return IRQ_HANDLED;
 
-	} else if (read_usr_irq & 0x01) {
+	} */ if (read_usr_irq & 0x01) {
 		//PCNPRINTK("Received in FIFO: %x\n", read_usr_irq);
 		user_interrupts_disable(KMSG);
-		ret = xdma_transfer(FROM_DEVICE, KMSG);
+		ret = xdma_transfer(FROM_DEVICE);
 		//PCNPRINTK("Transfer done\n");
 		//index = __get_recv_index(recv_queue);
 		//__update_recv_index(recv_queue, index + 1);
 		user_interrupts_enable(KMSG);
-		//return IRQ_HANDLED;
+	
+		return IRQ_HANDLED;
 
-	} else if (read_usr_irq & 0x02) {
+	} /* else if (read_usr_irq & 0x02) {
 		//start_time = ktime_get_ns();
 		user_interrupts_disable(RPR_RD);
 		//PCNPRINTK("RPR RD Intr: %x\n", read_usr_irq);
@@ -1396,12 +1460,12 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		user_interrupts_enable(VMFC);
 		//return IRQ_HANDLED;
 
-	} else if (read_usr_irq & 0x20) {
+	} */ else if (read_usr_irq & 0x02) {
 		user_interrupts_disable(FAULT);
 		printk(KERN_ERR "FAULT intr: %x\n", read_usr_irq);
 		PCNPRINTK("PKEY: %lx and %lx\n", ioread32((u32 *)(xdma_x + wr_pkey_msb)), ioread32((u32 *)(xdma_x + wr_pkey_lsb)));
 		user_interrupts_enable(FAULT);
-		//return IRQ_HANDLED;
+		return IRQ_HANDLED;
 	}
 
 
@@ -1449,7 +1513,7 @@ static irqreturn_t xdma_isr(int irq, void *dev_id)
 		//return IRQ_HANDLED;
 
 	}*/ else {
-		PCNPRINTK("Other interrupts: %d and %d\n", read_ch_irq, read_usr_irq);
+		//PCNPRINTK("Other interrupts: %d and Pending: %d and %d\n", read_usr_irq, ioread32((u32 *)(xdma_c + usr_irq_pending)));
 		//return IRQ_HANDLED;
 	}
 	
@@ -1476,6 +1540,18 @@ static int __start_handlers(void)
 	tsk = kthread_run(send_handler, NULL, "Send_Handler");
 	if(IS_ERR(tsk)) {
 		PCNPRINTK("Error Instantiating Send Handler\n");
+		return 1;
+	}
+
+	return 0;
+}
+
+static int __start_poll(void)
+{
+
+	poll_tsk = kthread_run(poll_dma, NULL, "Poll_Handler");
+	if(IS_ERR(poll_tsk)) {
+		PCNPRINTK("Error Instantiating Polling Handler\n");
 		return 1;
 	}
 
@@ -1546,12 +1622,20 @@ static void __exit exit_kmsg_xdma(void)
 	destroy_workqueue(wq);
 	//delete_pkeys();
 	tasklet_kill(&tasklet);
+
+	dma_free_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), c2h_poll_addr, c2h_poll_bus);
+	dma_free_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), h2c_poll_addr, h2c_poll_bus);
 	//tasklet_kill(&tasklet_page);
 
 	if(tsk) {
 		wake_up_process(tsk);
 		//kthread_stop(tsk);
 		PCNPRINTK("KThread Stopped\n");
+	}
+
+	if(poll_tsk) {
+		kthread_stop(poll_tsk);
+		PCNPRINTK("Polling Thread stopped\n");
 	}
 
 	PCNPRINTK("Popcorn message layer over XDMA unloaded\n");
@@ -1647,7 +1731,12 @@ static int __init init_kmsg_xdma(void)
 		goto out_free;
 	}
 	PCNPRINTK("Receive Queue done\n\r");
+	/*
 	if(__start_handlers()) {
+		goto out_free;
+	} */
+	
+	if(__start_poll()) {
 		goto out_free;
 	}
 
@@ -1656,6 +1745,17 @@ static int __init init_kmsg_xdma(void)
 	sema_init(&q_full, MAX_SEND_DEPTH);
 
 	PCNPRINTK("Handlers are setup\n\r");
+
+	c2h_poll_addr = dma_alloc_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), &c2h_poll_bus, GFP_KERNEL);
+	h2c_poll_addr = dma_alloc_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), &h2c_poll_bus, GFP_KERNEL);
+
+	PCNPRINTK("C2h virt and poll_mode_bus : %lx and %lx ;; %lx and %lx\n", c2h_poll_addr, c2h_poll_bus, h2c_poll_addr, h2c_poll_bus);
+
+	write_register(cpu_to_le32((c2h_poll_bus & XDMA_MSB_MASK) >> 32), xdma_c + c2h_poll_wr_msb);
+	write_register(cpu_to_le32(c2h_poll_bus & XDMA_LSB_MASK), xdma_c + c2h_poll_wr_lsb);
+
+	write_register(cpu_to_le32((h2c_poll_bus & XDMA_MSB_MASK) >> 32), xdma_c + h2c_poll_wr_msb);
+	write_register(cpu_to_le32(h2c_poll_bus & XDMA_LSB_MASK), xdma_c + h2c_poll_wr_lsb);
 
 	broadcast_my_node_info(2);
 

@@ -32,12 +32,12 @@ enum {
 
 	KMSG = 0,
 	PAGE = 1,
-	RPR_RD = 2,
+	RPR_READ = 2,
 	INVAL = 3,
 	FAULT = 4,
 	MKWRITE = 5,
 	RESP = 6,
-	RPR_WR = 7,
+	RPR_WRITE = 7,
 	VMFC = 8,
 };
 
@@ -45,7 +45,7 @@ enum {
 
 	PGREAD = 0,
 	PGWRITE = 1,
-	VMF_CONTINUE = 2,
+	VMFCON = 2,
 	PGINVAL = 3,
 	PGRESP = 4,
 };
@@ -91,14 +91,15 @@ int init_xdma(void)
 
 	/* Configuring the Interrupt Enable Masks */
 
-	write_register(0x30003, xdma_ctl + sgdma);
-	write_register(0x04, xdma_ctl + h2cintr);
+	write_register(0x10001, xdma_ctl + sgdma);
+	//write_register(0x04, xdma_ctl + h2cintr);
 	//write_register(0x04, xdma_ctl + h2c1intr);
-	write_register(0x04, xdma_ctl + c2hintr);
+	//write_register(0x04, xdma_ctl + c2hintr);
 	//write_register(0x04, xdma_ctl + c2h1intr);
 
-	write_register(0x03, xdma_ctl + ch_irqen);
-	write_register(0x3F, xdma_ctl + usr_irqen);
+	write_register(0x00, xdma_ctl + ch_irqen);
+	//write_register(0x03, (u32 *)(xdma_ctl + ch_irq_mask));
+	write_register(0x03, xdma_ctl + usr_irqen);
 
 	return (read_register(xdma_ctl + h2c_ctl) ||
 		read_register(xdma_ctl + c2h_ctl));
@@ -216,7 +217,7 @@ void user_interrupts_disable(int x)
 		
 	} /* else if (x == PAGE){
 		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
-	} */else if (x == RPR_RD){
+	} else if (x == RPR_RD){
 		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == INVAL){
@@ -228,8 +229,8 @@ void user_interrupts_disable(int x)
 	} else if (x == VMFC){
 		write_register(0x10, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x01, (u32 *)(xdma_axi + proc_mask));
-	} else if (x == FAULT){
-		write_register(0x20, (u32 *)(xdma_ctl + usr_irq_mask));
+	} */ else if (x == FAULT){
+		write_register(0x02, (u32 *)(xdma_ctl + usr_irq_mask));
 		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
 		write_register(0x08, (u32 *)(xdma_axi + proc_mask));
 	} else {
@@ -244,10 +245,10 @@ void user_interrupts_enable(int x)
 {
 	//PCNPRINTK("In user_interrupts enable\n");
 	 if (!x) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x01, (u32 *)(xdma_ctl + usr_irq_enable));
+		write_register(0x03, (u32 *)(xdma_ctl + usr_irq_enable));
 	} /* else if (x == PAGE) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
-	} */ else if (x == RPR_RD) {
+	}  else if (x == RPR_RD) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else if (x == INVAL) {
@@ -259,8 +260,8 @@ void user_interrupts_enable(int x)
 	} else if (x == VMFC) {
 		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x10, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
-	} else if (x == FAULT) {
-		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x20, (u32 *)(xdma_ctl + usr_irq_enable));
+	} */ else if (x == FAULT) {
+		write_register(ioread32((u32 *)(xdma_ctl + usr_irq_enable)) | 0x02, (u32 *)(xdma_ctl + usr_irq_enable));
 		write_register(0x00, (u32 *)(xdma_axi + proc_mask));
 	} else {
 		PCNPRINTK("Something wrong with the user_interrupts_enable\n");
@@ -316,45 +317,25 @@ int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z)
 }
 EXPORT_SYMBOL(config_descriptors_bypass);
 
-int xdma_transfer(int y, int z)
+int xdma_transfer(int y)
 {
 	//printk("Inside xdma_transfer\n");
 	if(y){
-		if(!z) {
-
 			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + h2c_ch));
-			write_register(0xFFFE25, xdma_ctl + h2c_ctl);
+			write_register(0x4FFFE25, xdma_ctl + h2c_ctl);
 			write_register(0x01, xdma_axi + Control1);
 			//write_register(0x00, (u32 *)(xdma_axi + switch_M0_mux));
 			return 0;
 
-		}/* else {
-
-			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + h2c1_ch));
-			write_register(0xFFFE25, xdma_ctl + h2c1_ctl);
-			write_register(0x01, xdma_axi + Control3);
-			return 0;
-
-		}*/
 	} else {
-		if(!z) {
-
+		
 			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + c2h_ctl));
 			//while(read_register(xdma_ctl + c2h_ch));
-			write_register(0xFFFE25, xdma_ctl + c2h_ctl);
+			write_register(0x4FFFE25, xdma_ctl + c2h_ctl);
 			write_register(0x01, xdma_axi + Control2);
 			//while(!(read_register(xdma_ctl + ch_irq) & 0x04));
 			//while((read_register(xdma_ctl + ch_irq) & 0x04));
 			return 0;
-
-		} /* else {
-
-			//PCNPRINTK("Inside xdma_transfer: %d\n", read_register(xdma_ctl + c2h1_ch));
-			write_register(0xFFFE25, xdma_ctl + c2h1_ctl);
-			write_register(0x01, xdma_axi + Control4);
-			return 0;
-
-		} */
 	}
 }
 EXPORT_SYMBOL(xdma_transfer);
@@ -556,6 +537,7 @@ void pending()
 }
 EXPORT_SYMBOL(pending);
 
+/*
 void req_test()
 {
 	int i;
@@ -580,6 +562,7 @@ void req_test()
 	//PCNPRINTK("Ch IRQ Pending: %lx and %lx\n", read_ch_irq, read_ch_pend);
 }
 EXPORT_SYMBOL(req_test);
+*/
 
 int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g)
 {

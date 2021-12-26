@@ -69,6 +69,12 @@
 #define ch_irq_pending 0x204C
 #define usr_irq_pending 0x2048
 
+#define h2c_poll_wr_msb 0x8C
+#define h2c_poll_wr_lsb 0x88
+#define c2h_poll_wr_msb 0x108C
+#define c2h_poll_wr_lsb 0x1088
+
+
 /* Register Offsets of Ethernet Subsystem */
 
 #define xxv_rxen xxv_0 + 0x014
@@ -168,14 +174,21 @@
 
 //#define switch_M0_mux switch_ctl + 0x40
 
-#define thresh 768
+#define thresh 4096
+
+#define RPR_WR 0xCCCC
+#define RPR_RD 0xBBBB
+#define VMF_CONTINUE 0xAAAA
+#define INVALIDATE 0xFFFF
+#define C2H_MAX_SIZE 5000
+
 
 void write_register(u32 value, void *iomem);
 inline u32 read_register(void *iomem);
 int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g);
 void write_mynid(int nid);
 
-int xdma_transfer(int y, int z);
+int xdma_transfer(int y);
 int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z);
 void channel_interrupts_disable(int z, int x);
 void user_interrupts_disable(int x);
@@ -196,6 +209,6 @@ void xdma_post_response(enum pcn_kmsg_type type, int result, int from_nid, unsig
 unsigned long current_pkey(void);
 void resolve_waiting(int ws_id);
 void pending(void);
-void req_test(void);
+//void req_test(void);
 
 #endif
