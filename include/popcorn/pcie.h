@@ -181,7 +181,7 @@
 #define VMF_CONTINUE 0xAAAA
 #define INVALIDATE 0xFFFF
 #define C2H_MAX_SIZE 5000
-
+#define FDSM_MSG_SIZE 8192
 
 void write_register(u32 value, void *iomem);
 inline u32 read_register(void *iomem);

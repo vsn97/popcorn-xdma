@@ -695,8 +695,10 @@ static phys_addr_t arm_v7s_iova_to_phys(struct io_pgtable_ops *ops,
 		ptep = iopte_deref(pte, lvl);
 	} while (ARM_V7S_PTE_IS_TABLE(pte, lvl));
 
-	if (!ARM_V7S_PTE_IS_VALID(pte))
+	if (!ARM_V7S_PTE_IS_VALID(pte)) {
+		printk("ARM v7s pte isn't valid: %llx\n", iova);
 		return 0;
+	}
 
 	mask = ARM_V7S_LVL_MASK(lvl);
 	if (arm_v7s_pte_is_cont(pte, lvl))

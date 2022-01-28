@@ -24,7 +24,7 @@
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
 #include <linux/timekeeping.h>
-
+#include <linux/resource.h> 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -43,7 +43,10 @@
 
 #include "trace_events.h"
 
-u64 start_time, end_time, res_time; 
+u64 start_time, end_time, res_time;
+static u64 gpf_time = 0;
+static unsigned long no_of_gpf = 0;
+static unsigned long no_of_pages_sent = 0;
 
 /* PKEY RADIX TREE */
 RADIX_TREE(pkey_rd_tree, GFP_ATOMIC);
@@ -1096,6 +1099,7 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
  */
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
+	//PCNPRINTK("Its a remote page response\n");
 	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
@@ -1409,6 +1413,7 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval)
 {
 	unsigned long *res;
+	struct rusage *usage;
 	if (!vma->vm_mm->remote) return;
 
 	ClearPageInfo(vma->vm_mm, addr);
@@ -1426,6 +1431,25 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
 		update_mmu_cache(vma, addr, pte);
 	}
+	 
+	if (no_of_gpf) {
+		PCNPRINTK("Number of page faults in this application: %ld and Time between page faults : %lld\n", no_of_gpf, (gpf_time/(no_of_gpf-1)));
+		PCNPRINTK("No. of pages sent and bytes: %lld and %lld\n", no_of_pages_sent, no_of_pages_sent * PAGE_SIZE); 
+	/*	usage = (struct rusage *)kmalloc(sizeof(struct rusage *), GFP_KERNEL);
+		getrusage(current, RUSAGE_SELF, usage);
+		if (usage) {
+			if (&usage->ru_utime) {
+				PCNPRINTK("Total user time: %lld and %lld\n", usage->ru_utime.tv_sec, usage->ru_utime.tv_usec);
+				PCNPRINTK("Total sys time: %lld and %lld\n", usage->ru_stime.tv_sec, usage->ru_stime.tv_usec);
+				PCNPRINTK("Other stats: %lld, %lld; %lld and %lld\n", usage->ru_majflt, usage->ru_minflt, usage->ru_inblock, usage->ru_oublock);
+				PCNPRINTK("Mem stats: %lld and %lld\n", usage->ru_maxrss, usage->ru_ixrss);
+			}		} 
+		kfree(usage); */
+		no_of_gpf = 0;
+		gpf_time = 0;
+		no_of_pages_sent = 0;
+	}
+
 //#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 //	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
 //#endif
@@ -1531,7 +1555,9 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 				req->rdma_addr, paddr, PAGE_SIZE);
 		kunmap(page);
 	} else {
+		
 		paddr = kmap_atomic(page);
+		no_of_pages_sent += 1;
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 	}
@@ -1657,6 +1683,7 @@ again:
 		 else {
 			paddr = kmap_atomic(page);
 			copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+			no_of_pages_sent += 1;
 			kunmap_atomic(paddr);
 		}
 	}
@@ -1873,6 +1900,7 @@ again:
 		//pcn_kmsg_xdma_write(from_nid,
 					//dma_addr, paddr, PAGE_SIZE);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+		no_of_pages_sent += 1;
 		kunmap_atomic(paddr);
 	}
 
@@ -1945,6 +1973,7 @@ static int __xdma_handle_rmfault_at_remote(struct task_struct *tsk, struct mm_st
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+	no_of_pages_sent += 1;
 	//PCNPRINTK("Writing the page to origin\n");	
 	//pcn_kmsg_xdma_write(from_nid,
 			//dma_addr, paddr, PAGE_SIZE);
@@ -2610,13 +2639,14 @@ static int __xdma_handle_lcfault_at_remote(struct vm_fault *vmf)
 		pkey = 0;
 		//PCNPRINTK("Didn't find the PKEY\n");
 	}
-
+	//start_time = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, tsk->origin_nid, vmf->flags, ws->id, 1);
 
 	//PCNPRINTK("Starting to wait\n");
 	rp = wait_at_station(ws);
-
+	//end_time = ktime_get_ns();
+	//PCNPRINTK("Time taken to receive a page from origin: %ld\n", end_time - start_time);
 	if(rp->result == 0) {
 		//PCNPRINTK("Page has been granted to remote\n");
 		void *paddr = kmap(page);
@@ -2811,7 +2841,8 @@ static int __xdma_handle_lcfault_at_origin(struct vm_fault *vmf)
 	ret = check_msg_type(resp);
 	//PCNPRINTK("Message type : %d\n", ret);
 	if (ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT || ret == PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE) {
-		//PCNPRINTK("its a remote page response and time taken: %d!\n");
+		//end_time = ktime_get_ns();
+		//PCNPRINTK("its a remote page response and time taken: %ld!\n", end_time - start_time);
 		rp = (remote_page_response_t *)resp;
 		bool present;
 		present = pte_is_present(vmf->orig_pte);
@@ -2887,7 +2918,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 {
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
-
+	end_time = ktime_get_ns();
 	might_sleep();
 
 	PGPRINTK("\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
@@ -2899,6 +2930,15 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	/**
 	 * Thread at the origin
 	 */
+	if (!no_of_gpf) {
+		start_time = ktime_get_ns();
+	} else {
+		gpf_time += end_time - start_time;
+		start_time = ktime_get_ns();
+	}
+
+	no_of_gpf += 1;
+
 	if (!current->at_remote) {
 		//PCNPRINTK("Fault @ ORIGIN\n");
 		if (TRANSFER_PAGE_WITH_XDMA) {
@@ -2929,6 +2969,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 			PGPRINTK("  [%d] locally file-mapped read-only. continue\n",
 					current->pid);
 			ret = VM_FAULT_CONTINUE;
+			no_of_gpf -= 1;
 			goto out;
 		}
 	}
@@ -2968,7 +3009,6 @@ out:
 
 	return ret;
 }
-
 
 /**************************************************************************
  * Routing popcorn messages to workers

@@ -10,7 +10,7 @@
 #include <linux/err.h>
 #include <linux/time.h> 
 #include <linux/timekeeping.h>
-
+#include <asm/io.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/page_server.h>
 #include <popcorn/pcie.h>

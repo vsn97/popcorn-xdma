@@ -24,7 +24,7 @@
 #include <linux/delay.h>
 #include <linux/time.h>
 #include <linux/timekeeping.h>
-#include <linux/radix-tree.h>
+
 #include <popcorn/stat.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/page_server.h>
@@ -40,8 +40,6 @@
 #define XDMA_SLOT_SIZE PAGE_SIZE * 2
 #define XDMA_SLOTS 320 
 
-RADIX_TREE(send_tree, GFP_ATOMIC);
-
 static unsigned long *c2h_poll_addr;
 static unsigned long *h2c_poll_addr;
 static dma_addr_t c2h_poll_bus;
@@ -53,7 +51,6 @@ static struct iommu_domain *domain;
 
 static unsigned long total = 0;
 static unsigned long actual = 0;
-static unsigned long no_of_messages = 0;
 
 u64 start_time, end_time, res_time, end_time1, end_time2; 
 
@@ -83,7 +80,6 @@ struct semaphore q_full;
 
 static int page_ix = 0;
 static int nid;
-static int base_index = 0;
 
 static ktime_t start_s, start_w, end_s, end_w;
 s64 actual_time_w, actual_time_s; 
@@ -492,7 +488,7 @@ static struct send_work *__get_xdma_send_work(size_t size)
 static struct send_work *__get_send_work(int index) 
 {
 	struct send_work *work;
-	//PCNPRINTK("Index: %d\n", index);
+	PCNPRINTK("Index: %d\n", index);
 	if (index == send_queue->nr_entries) {
 		send_queue->tail = -1;
 	}
@@ -696,7 +692,6 @@ int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 	DECLARE_COMPLETION_ONSTACK(done);
 
 	work = __get_send_work(send_queue->tail);
-	
 	//PCNPRINTK("Inside xdma send function and size: %d and %d and %lx\n", msg->header.type, msg->header.from_nid, msg->header.size);
 	/*
 	if(size <= use_rb_thr) {
@@ -706,14 +701,14 @@ int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 		work = __get_xdma_send_work_map(msg, size);
 	}
 	*/
-	/*
-	PCNPRINTK("__SEND FRAME __\n");
-	for(i = 0; i < 25; i++){
-		printk("%lx\n", read_register((u32 *)msg+i));
-	}
-	PCNPRINTK("__SEND FRAME END __\n");
-	*/
-	memcpy(work->addr, msg, size);
+
+	//PCNPRINTK("__SEND FRAME __\n");
+	//for(i = 0; i < 25; i++){
+	//	printk("%lx\n", read_register((u32 *)msg+i));
+	//}
+	//PCNPRINTK("__SEND FRAME END __\n");
+	
+	work->addr = msg;
 	work->done = &done;
 	//printk("DMA Addr: %lx\n", work->dma_addr);
 	//__enq_send(work);
@@ -722,7 +717,7 @@ int xdma_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 	//PCNPRINTK("Curr sw updated\n");
 	ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
 	ret = xdma_transfer(TO_DEVICE);
-	//PCNPRINTK("xdma_transfer done: %llx and %llx\n", work->addr, work->dma_addr);
+	PCNPRINTK("xdma_transfer done: %lx and %llx\n", work->addr, work->dma_addr);
 	spin_unlock(&xdma_lock);
 
 	__process_sent(work);
@@ -799,26 +794,18 @@ int xdma_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	//start_time = ktime_get_ns();
 	int ret;
-	dma_addr_t dma_addr;
-	//struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
-	//struct send_work *work = rbah->work;
-	//PCNPRINTK("Post addr: %llx\n", (unsigned long *)msg);
-	dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
+	struct rb_alloc_header *rbah = (struct rb_alloc_header *)msg - 1;
+	struct send_work *work = rbah->work;
 
-	if (dma_addr) {
-		spin_lock(&xdma_lock);
-		//curr_sw = work;
-		//PCNPRINTK("Curr sw updated\n");
-		ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
-		ret = xdma_transfer(TO_DEVICE);
-		//start_time = ktime_get_ns();
-		//PCNPRINTK("xdma_transfer done\n");
-		spin_unlock(&xdma_lock);
-		//__process_sent(work);
-	} else {
-		printk("DMA addr: not found\n");
-	}
-
+	spin_lock(&xdma_lock);
+	//curr_sw = work;
+	//PCNPRINTK("Curr sw updated\n");
+	ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
+	ret = xdma_transfer(TO_DEVICE);
+	start_time = ktime_get_ns();
+	//PCNPRINTK("xdma_transfer done\n");
+	spin_unlock(&xdma_lock);
+	__process_sent(work);
 	//PCNPRINTK("Contents inside the POST function: %d and %d and %lx\n", msg->header.type, msg->header.from_nid, msg->header.size);
 	//PCNPRINTK("__POST FRAME __\n");
 	//for(i = 0; i < 25; i++){
@@ -864,7 +851,7 @@ struct pcn_kmsg_message *xdma_kmsg_get(size_t size)
 {
 	struct send_work *work = __get_send_work(send_queue->tail);
 	//struct rb_alloc_header *rbah = work->addr;
-	//PCNPRINTK("Inside xdma kmsg get function: %d\n", send_queue->tail);
+	PCNPRINTK("Inside xdma kmsg get function: %d\n", send_queue->tail);
 
 	return (struct pcn_kmsg_message *)(work->addr);
 }
@@ -955,14 +942,14 @@ static int poll_dma(void* arg0)
 			//PCNPRINTK("Time taken to process message: %ld\n", end_time - start_time);
 
 		} else if (h2c_desc_complete != 0) {
-			//end_time = ktime_get_ns();
-			//PCNPRINTK("Time taken for H2C: %ld\n", end_time - start_time);
-			no_of_messages += 1;
+			end_time = ktime_get_ns();
+			PCNPRINTK("Time taken for H2C: %ld\n", end_time - start_time);
+
 			write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
 			write_register(0x06, (u32 *)(xdma_c + h2c_ch));
 
 			poll_h2c_wb->completed_desc_count = 0;
-			//printk(KERN_INFO "Sent message: %lx\n", h2c_desc_complete);
+			printk(KERN_INFO "Sent message: %lx\n", h2c_desc_complete);
 		}
 	}
 
@@ -981,8 +968,7 @@ unsigned int queue_size(queue_t* q)
 void free_queue(queue_t* q)
 {
 	int i;
-	for (i = 0; i<q->nr_entries; i++) {
-		radix_tree_delete(&send_tree, q->work_list[i]->addr);
+	for(i = 0; i<q->size; i++) {
 		kfree(q->work_list[i]);
 	}
 
@@ -993,7 +979,7 @@ void free_queue(queue_t* q)
 void free_queue_r(queue_tr* q)
 {
 	int i;
-	for (i = 0; i< q->nr_entries; i++) {
+	for(i = 0; i<q->size; i++) {
 		kfree(q->work_list[i]);
 	}
 
@@ -1020,14 +1006,6 @@ static queue_t* __setup_send_queue(int entries)
 	for(i = 0; i<entries; i++) {
 		send_q->work_list[i] = kmalloc(sizeof(struct send_work), GFP_KERNEL);
 		send_q->work_list[i]->header.type = WORK_TYPE_SEND;
-		send_q->work_list[i]->addr = base_addr + FDSM_MSG_SIZE * base_index;
-		send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
-		++base_index;
-		radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->dma_addr);
-		
-		PCNPRINTK("Send_q : %llx and %llx and %d\n", send_q->work_list[i]->addr, send_q->work_list[i]->dma_addr, base_index);
-		
-		/*
 		send_q->work_list[i]->addr = dma_alloc_coherent(&pci_dev->dev, FDSM_MSG_SIZE, &send_q->work_list[i]->dma_addr, GFP_KERNEL);
 		
 		if (CONFIG_ARM64) {
@@ -1035,7 +1013,7 @@ static queue_t* __setup_send_queue(int entries)
 			ret = domain->ops->map(domain, (unsigned long)send_q->work_list[i]->dma_addr + 0x1000, virt_to_phys(send_q->work_list[i]->addr )+ 0x1000, PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 			if (ret) 
 				goto out;
-		} */
+		}
 	}
 
 	return send_q;
@@ -1303,18 +1281,16 @@ static __init queue_tr* __setup_recv_buffer(int entries)
 	for(i = 0; i < entries; i++) {
 		recv_q->work_list[i] = kmalloc(sizeof(struct recv_work), GFP_KERNEL);
 		recv_q->work_list[i]->header.type = WORK_TYPE_RECV;
-		recv_q->work_list[i]->addr = base_addr +  FDSM_MSG_SIZE * base_index;
-		recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
-		++base_index;
-		PCNPRINTK("Inside Recv Buffer: %llx and %llx and %d\n", (unsigned long)recv_q->work_list[i]->addr, recv_q->work_list[i]->dma_addr, base_index);
+		recv_q->work_list[i]->addr = dma_alloc_coherent(&pci_dev->dev, FDSM_MSG_SIZE,  &recv_q->work_list[i]->dma_addr, GFP_KERNEL);
+		//recv_q->work_list[i]->dma_addr = dma_map_single(&pci_dev->dev,recv_q->work_list[i]->addr, C2H_MAX_SIZE, DMA_FROM_DEVICE);
+		PCNPRINTK("Inside Recv Buffer: %lx and %llx \n", (unsigned long)recv_q->work_list[i]->addr, recv_q->work_list[i]->dma_addr);
 
-		/*
 		if (CONFIG_ARM64) {
 			ret = domain->ops->map(domain, (unsigned long)recv_q->work_list[i]->dma_addr, virt_to_phys(recv_q->work_list[i]->addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 			ret = domain->ops->map(domain, (unsigned long)recv_q->work_list[i]->dma_addr + 0x1000, virt_to_phys(recv_q->work_list[i]->addr) + 0x1000, PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 			if (ret) 
 				goto out;
-		} */
+		}
 	}
 
 	//index = __get_recv_index(recv_q);
@@ -1658,7 +1634,7 @@ static void __exit exit_kmsg_xdma(void)
 	int i;
 
 	PCNPRINTK("Total, actual and misfired interrupts:  %ld and %ld and %ld\n", total, actual, total - actual);
-	PCNPRINTK("No of sent messages: %ld", no_of_messages);
+
 	/* Detach from messaging layer to avoid race conditions */
 
 	pcn_kmsg_set_transport(NULL);
@@ -1723,7 +1699,6 @@ static void __exit exit_kmsg_xdma(void)
 	//delete_pkeys();
 	tasklet_kill(&tasklet);
 
-	dma_free_coherent(&pci_dev->dev, SZ_2M, base_addr, base_dma);
 	dma_free_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), c2h_poll_addr, c2h_poll_bus);
 	dma_free_coherent(&pci_dev->dev, sizeof(struct xdma_poll_wb), h2c_poll_addr, h2c_poll_bus);
 	//tasklet_kill(&tasklet_page);
@@ -1802,15 +1777,14 @@ static int __init init_kmsg_xdma(void)
 	
 	PCNPRINTK("\n XDMA Layer Configured ...\n");
 
-	my_nid = 1;
+	my_nid = 0;
 	PCNPRINTK("Node number: %d\n", my_nid);
 	write_mynid(my_nid);
 	set_popcorn_node_online(my_nid, true);
 	pci_set_master(pci_dev);
 	base_addr = dma_alloc_coherent(&pci_dev->dev, SZ_2M, &base_dma, GFP_KERNEL);
-	printk("Base addr: %llx and %llx\n", base_addr, base_dma);	
 
-#ifdef CONFIG_ARM64 
+	if (CONFIG_ARM64) {
 		domain = iommu_get_domain_for_dev(&pci_dev->dev);
 		//iommu_map = arm_iommu_create_mapping(&pci_dev->dev->bus, base_dma, PAGE_SIZE * PAGE_SIZE);
 		if (!domain) goto out_free;
@@ -1821,7 +1795,7 @@ static int __init init_kmsg_xdma(void)
 			//printk("Got IOMMU MAP\n");
 			//arm_iommu_attach_device(&pci_dev->dev, iommu_map);
 		//}
-#endif
+	}
 
 	if(__setup_irq_handler()) {
 		goto out_free;
@@ -1837,22 +1811,23 @@ static int __init init_kmsg_xdma(void)
 	PCNPRINTK("XDMA Buff Done\n");
 
 	wq = create_workqueue("recv");
-	if(!wq)
+	if(!wq) {
 		goto out_free;
+	}
 	PCNPRINTK("Work Queue Done\n");
-
+	/*
 	send_queue = __setup_send_queue(MAX_SEND_DEPTH);
-	if (!send_queue) 
+	if (!send_queue) {
 		goto out_free;
-
+	}
 	PCNPRINTK("Sent Queue done\n\r");
 
 	recv_queue = __setup_recv_buffer(MAX_RECV_DEPTH);
-	if (!recv_queue)
+	if (!recv_queue) {
 		goto out_free;
-
+	}
 	PCNPRINTK("Receive Queue done\n\r");
-
+	*/
 	/*	
 	if(__start_handlers()) {
 		goto out_free;
@@ -1876,23 +1851,23 @@ static int __init init_kmsg_xdma(void)
 	write_register(cpu_to_le32((h2c_poll_bus & XDMA_MSB_MASK) >> 32), xdma_c + h2c_poll_wr_msb);
 	write_register(cpu_to_le32(h2c_poll_bus & XDMA_LSB_MASK), xdma_c + h2c_poll_wr_lsb);
 	
-#ifdef CONFIG_ARM64
+	if (CONFIG_ARM64) {
 		ret = domain->ops->map(domain, (unsigned long)h2c_poll_bus, virt_to_phys(h2c_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 		if (ret) goto out_free;
 			ret = domain->ops->map(domain, (unsigned long)c2h_poll_bus, virt_to_phys(c2h_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 		if(ret) goto out_free;
-#endif
-
-	if (__start_poll()) 
+	}
+	if(__start_poll()) {
 		goto out_free;
+	}
 
 	broadcast_my_node_info(2);
 
 	PCNPRINTK("... Ready on XDMA ... \n");
 	//req_test();
 	
-	//ret = config_descriptors_bypass(base_dma + 0x10, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
-	//ret = xdma_transfer(TO_DEVICE);
+	ret = config_descriptors_bypass(base_dma + 0x10, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
+	ret = xdma_transfer(TO_DEVICE);
 
 	return 0;
 

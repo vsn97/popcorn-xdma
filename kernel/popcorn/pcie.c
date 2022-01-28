@@ -4,7 +4,7 @@
 #include <linux/delay.h>
 #include <linux/timekeeping.h>
 #include <linux/spinlock.h>
-
+#include <asm/io.h>
 #include <popcorn/stat.h>
 #include <popcorn/debug.h>
 #include <popcorn/bundle.h>

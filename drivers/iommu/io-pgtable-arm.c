@@ -381,14 +381,18 @@ static int __arm_lpae_map(struct arm_lpae_io_pgtable *data, unsigned long iova,
 	size_t block_size = ARM_LPAE_BLOCK_SIZE(lvl, data);
 	size_t tblsz = ARM_LPAE_GRANULE(data);
 	struct io_pgtable_cfg *cfg = &data->iop.cfg;
-
+	//printk("%s\n", __func__);
 	/* Find our entry at the current level */
 	ptep += ARM_LPAE_LVL_IDX(iova, lvl, data);
 
 	/* If we can install a leaf entry at this level, then do so */
 	if (size == block_size && (size & cfg->pgsize_bitmap))
 		return arm_lpae_init_pte(data, iova, paddr, prot, lvl, ptep);
-
+	
+	/* Hack for fDSM mappings 8kB page granules */
+	if (size == 2 * block_size) 
+		return arm_lpae_init_pte(data, iova, paddr, prot, lvl, ptep);
+	
 	/* We can't allocate tables at the final level */
 	if (WARN_ON(lvl >= ARM_LPAE_MAX_LEVELS - 1))
 		return -EINVAL;
@@ -463,7 +467,7 @@ static arm_lpae_iopte arm_lpae_prot_to_pte(struct arm_lpae_io_pgtable *data,
 
 	if (prot & IOMMU_NOEXEC)
 		pte |= ARM_LPAE_PTE_XN;
-
+	//printk("%s and returned pte\n", __func__);
 	return pte;
 }
 
@@ -474,10 +478,13 @@ static int arm_lpae_map(struct io_pgtable_ops *ops, unsigned long iova,
 	arm_lpae_iopte *ptep = data->pgd;
 	int ret, lvl = ARM_LPAE_START_LVL(data);
 	arm_lpae_iopte prot;
+	//printk("ARM_LPAE_MAP: %llx and %lx and %x\n", iova, paddr, iommu_prot);
 
 	/* If no access, then nothing to do */
-	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
+	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE))) {
+		printk("No access in lpae_map\n");
 		return 0;
+	}
 
 	if (WARN_ON(iova >= (1ULL << data->iop.cfg.ias) ||
 		    paddr >= (1ULL << data->iop.cfg.oas)))
@@ -490,7 +497,7 @@ static int arm_lpae_map(struct io_pgtable_ops *ops, unsigned long iova,
 	 * a chance for anything to kick off a table walk for the new iova.
 	 */
 	wmb();
-
+	//printk("Sync and mapping done\n");
 	return ret;
 }
 
@@ -662,17 +669,19 @@ static phys_addr_t arm_lpae_iova_to_phys(struct io_pgtable_ops *ops,
 
 	do {
 		/* Valid IOPTE pointer? */
-		if (!ptep)
+		if (!ptep) {
+			printk("Valid PTEP is not found for the address: %llx\n", iova);
 			return 0;
-
+		}
 		/* Grab the IOPTE we're interested in */
 		ptep += ARM_LPAE_LVL_IDX(iova, lvl, data);
 		pte = READ_ONCE(*ptep);
 
 		/* Valid entry? */
-		if (!pte)
+		if (!pte) {
+			printk("Valid PTE is not found for the address: %llx\n", iova);
 			return 0;
-
+		}
 		/* Leaf entry? */
 		if (iopte_leaf(pte, lvl, data->iop.fmt))
 			goto found_translation;
@@ -682,6 +691,7 @@ static phys_addr_t arm_lpae_iova_to_phys(struct io_pgtable_ops *ops,
 	} while (++lvl < ARM_LPAE_MAX_LEVELS);
 
 	/* Ran out of page tables to walk */
+	printk("Ran out of page tables to walk\n");
 	return 0;
 
 found_translation:

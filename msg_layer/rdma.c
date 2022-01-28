@@ -528,7 +528,7 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	dma_addr = ib_dma_map_single(rdma_mr->device, addr, size, DMA_TO_DEVICE);
 	ret = ib_dma_mapping_error(rdma_mr->device, dma_addr);
 	BUG_ON(ret);
-
+	PCNPRINTK("DMA addr: %lx and %llx\n", dma_addr, rdma_addr);
 	rw = __get_rdma_work(dma_addr, size, rdma_addr, rdma_key);
 	BUG_ON(!rw);
 
